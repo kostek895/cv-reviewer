@@ -36,7 +36,7 @@ export async function POST(req: Request, ctx: RouteContext<"/api/jobs/[id]/run">
         break;
       case "improve": {
         if (!job.cv || !job.analysis) throw new Error("Najpierw napisz CV");
-        const target = Math.min(100, Math.max(50, Math.round(Number(body.target) || 96)));
+        const target = Math.min(100, Math.max(50, Math.round(Number(body.target) || 100)));
         await startJobTask(id, "improve", () => doImprove(id, target));
         break;
       }

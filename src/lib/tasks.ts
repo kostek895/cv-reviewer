@@ -316,11 +316,9 @@ ${JSON.stringify(
   });
 }
 
-// ---------- Automatyczne poprawki do celu ----------
+// ---------- Jedna runda poprawek (popraw → oceń), iterowana ręcznie ----------
 
-const MAX_ROUNDS = 3;
-
-export async function doImprove(id: string, target: number) {
+export async function doImprove(id: string, target = 100) {
   let job = (await getJob(id))!;
   if (!job.cv || !job.analysis) throw new Error("Najpierw napisz CV");
   const profile = await getProfile();
@@ -346,7 +344,7 @@ export async function doImprove(id: string, target: number) {
     ((await getJob(id))?.improve?.questions ?? []).filter((q) => q.kind === "pytanie" && !q.answer.trim()).length;
   const askOrStop = async (reason: string) => {
     const n = await openQuestions();
-    return stop(n ? `${reason} Odpowiedz na ${n} ${n === 1 ? "pytanie" : "pytania"} poniżej i kliknij „Poprawiaj dalej”.` : reason);
+    return stop(n ? `${reason} Odpowiedz na ${n} ${n === 1 ? "pytanie" : "pytania"} poniżej i kliknij „Popraw jeszcze raz”.` : reason);
   };
 
   await updateJob(id, (j) => {
@@ -365,16 +363,15 @@ export async function doImprove(id: string, target: number) {
     job = (await getJob(id))!;
   }
 
-  for (let i = 0; i < MAX_ROUNDS; i++) {
-    const before = job.cvScore!;
-    if (before.score >= target) return stop(`Cel osiągnięty: ${before.score}%.`);
-    const round = (job.improve?.rounds.at(-1)?.round ?? 0) + 1;
-    await setTaskMessage(id, `Runda ${i + 1}/${MAX_ROUNDS}: Claude wprowadza poprawki (teraz ${before.score}%, cel ${target}%)…`);
+  const before = job.cvScore!;
+  if (before.score >= target) return stop(`CV ma już ${before.score}%.`);
+  const round = (job.improve?.rounds.at(-1)?.round ?? 0) + 1;
+  await setTaskMessage(id, `Runda ${round}: Claude wprowadza poprawki (teraz ${before.score}%)…`);
 
-    const rejected = (job.improve?.changes ?? [])
-      .filter((c) => c.status === "cofnięta")
-      .map((c) => ({ pole: pathLabel(job.cv!, c.path), odrzucona_wersja: c.after, komentarz: c.comment ?? "" }));
-    const prompt = `Przeprowadź jedną rundę poprawek zgodnie z instrukcją skilla cv-improve. Cel: ${target}/100.
+  const rejected = (job.improve?.changes ?? [])
+    .filter((c) => c.status === "cofnięta")
+    .map((c) => ({ pole: pathLabel(job.cv!, c.path), odrzucona_wersja: c.after, komentarz: c.comment ?? "" }));
+  const prompt = `Przeprowadź jedną rundę poprawek zgodnie z instrukcją skilla cv-improve. Cel: ${target}/100.
 
 <ocena_cv wynik="${before.score}">
 ${JSON.stringify({ comment: before.comment, suggestions: before.suggestions, missingKeywords: before.missingKeywords, requirements: before.requirements }, null, 1)}
@@ -403,76 +400,70 @@ ${job.userNotes || "(brak)"}
 <baza_kandydata>
 ${await profileForPrompt(profile)}
 </baza_kandydata>`;
-    const res = await runSkill<{
-      changes: { path: string; text: string; list: string[]; reason: string }[];
-      questions: { question: string; kind: ImproveQuestion["kind"] }[];
-    }>({
-      skill: "cv-improve",
-      prompt,
-      schema: improveSchema,
-      tools: [],
-    });
-    await mergeQuestions(res.questions);
+  const res = await runSkill<{
+    changes: { path: string; text: string; list: string[]; reason: string }[];
+    questions: { question: string; kind: ImproveQuestion["kind"] }[];
+  }>({
+    skill: "cv-improve",
+    prompt,
+    schema: improveSchema,
+    tools: [],
+  });
+  await mergeQuestions(res.questions);
 
-    const applied: CvChange[] = [];
+  const applied: CvChange[] = [];
+  await updateJob(id, (j) => {
+    if (!j.cv || !j.improve) return;
+    const seen = new Set<string>();
+    for (const c of res.changes) {
+      if (!isValidPath(j.cv, c.path) || seen.has(c.path)) continue;
+      const after: CvValue = isListPath(c.path) ? c.list.map((x) => x.trim()).filter(Boolean) : c.text.trim();
+      const prev = getAt(j.cv, c.path);
+      if (!after.length || sameValue(prev, after)) continue;
+      seen.add(c.path);
+      setAt(j.cv, c.path, after);
+      applied.push({ id: newChangeId(), round, path: c.path, before: prev, after, reason: c.reason, status: "do przejrzenia" });
+    }
+    j.improve.changes.push(...applied);
+    j.improve.rounds.push({ round, scoreBefore: before.score });
+    j.pdf = undefined;
+  });
+  if (!applied.length) {
+    await updateJob(id, (j) => void j.improve?.rounds.pop());
+    return askOrStop(
+      (await openQuestions())
+        ? `Bez nowych faktów Claude nie ma już czego poprawić (wynik ${before.score}%).`
+        : `Claude nie widzi już poprawek opartych na Twoich faktach (wynik ${before.score}%). Pozostałe różnice to realne braki – to w porządku, nie każda oferta pasuje w 100%.`
+    );
+  }
+
+  await setTaskMessage(id, `Runda ${round}: oceniam CV po ${applied.length} poprawkach…`);
+  await doScore(id);
+  job = (await getJob(id))!;
+  const after = job.cvScore!.score;
+
+  if (after < before.score) {
+    // runda pogorszyła wynik – przywróć poprzednią wersję i poprzednią ocenę
     await updateJob(id, (j) => {
       if (!j.cv || !j.improve) return;
-      const seen = new Set<string>();
-      for (const c of res.changes) {
-        if (!isValidPath(j.cv, c.path) || seen.has(c.path)) continue;
-        const after: CvValue = isListPath(c.path) ? c.list.map((x) => x.trim()).filter(Boolean) : c.text.trim();
-        const prev = getAt(j.cv, c.path);
-        if (!after.length || sameValue(prev, after)) continue;
-        seen.add(c.path);
-        setAt(j.cv, c.path, after);
-        applied.push({ id: newChangeId(), round, path: c.path, before: prev, after, reason: c.reason, status: "do przejrzenia" });
+      for (const c of applied) {
+        setAt(j.cv, c.path, c.before);
+        const ch = j.improve.changes.find((x) => x.id === c.id);
+        if (ch) ch.status = "cofnięta";
       }
-      j.improve.changes.push(...applied);
-      j.improve.rounds.push({ round, scoreBefore: before.score });
-      j.pdf = undefined;
+      const r = j.improve.rounds.at(-1)!;
+      r.scoreAfter = after;
+      r.reverted = true;
+      j.cvScore = before;
     });
-    if (!applied.length) {
-      await updateJob(id, (j) => void j.improve?.rounds.pop());
-      return askOrStop(
-        (await openQuestions())
-          ? `Bez nowych faktów Claude nie ma już czego poprawić (wynik ${before.score}%).`
-          : `Claude nie widzi już poprawek opartych na Twoich faktach (wynik ${before.score}%). Pozostałe różnice to realne braki – to w porządku, nie każda oferta pasuje w 100%.`
-      );
-    }
-
-    await setTaskMessage(id, `Runda ${i + 1}/${MAX_ROUNDS}: oceniam CV po ${applied.length} poprawkach…`);
-    await doScore(id);
-    job = (await getJob(id))!;
-    const after = job.cvScore!.score;
-
-    if (after < before.score) {
-      // runda pogorszyła wynik – przywróć poprzednią wersję i poprzednią ocenę
-      await updateJob(id, (j) => {
-        if (!j.cv || !j.improve) return;
-        for (const c of applied) {
-          setAt(j.cv, c.path, c.before);
-          const ch = j.improve.changes.find((x) => x.id === c.id);
-          if (ch) ch.status = "cofnięta";
-        }
-        const r = j.improve.rounds.at(-1)!;
-        r.scoreAfter = after;
-        r.reverted = true;
-        j.cvScore = before;
-      });
-      return askOrStop(`Runda ${round} obniżyła wynik (${before.score}% → ${after}%), więc ją cofnąłem.`);
-    }
-
-    await updateJob(id, (j) => {
-      const r = j.improve?.rounds.at(-1);
-      if (r) r.scoreAfter = after;
-    });
-    if (after >= target) return stop(`Cel osiągnięty: ${after}%.`);
-    // po każdej rundzie z brakującymi faktami – zatrzymaj się i zapytaj kandydata
-    if (await openQuestions()) return askOrStop(`Runda ${round}: ${before.score}% → ${after}%.`);
-    if (after - before.score < 2)
-      return stop(`Wynik przestał rosnąć (${before.score}% → ${after}%). Pozostałe różnice to realne braki – to w porządku, nie każda oferta pasuje w 100%.`);
+    return askOrStop(`Runda ${round} obniżyła wynik (${before.score}% → ${after}%), więc ją cofnąłem.`);
   }
-  return stop(`Limit ${MAX_ROUNDS} rund w jednym przebiegu – wynik ${job.cvScore!.score}%. Możesz uruchomić kolejny.`);
+
+  await updateJob(id, (j) => {
+    const r = j.improve?.rounds.at(-1);
+    if (r) r.scoreAfter = after;
+  });
+  return askOrStop(`Runda ${round}: ${before.score}% → ${after}%. Przejrzyj zmiany i w razie potrzeby uruchom kolejną rundę.`);
 }
 
 const newChangeId = () => Math.random().toString(36).slice(2, 10);

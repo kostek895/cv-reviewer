@@ -5,9 +5,7 @@ import { api, Area, Badge, Section, Spinner, useDebouncedEffect } from "@/compon
 import { isValidPath, pathLabel } from "@/lib/cvpath";
 import type { CvChange, Job, TailoredCv } from "@/lib/types";
 
-const TARGETS = [90, 96, 100];
-
-/** Pętla „popraw → oceń” do zadanego wyniku + przegląd każdej zmiany. */
+/** Ręczne rundy „popraw → oceń” + przegląd każdej zmiany. */
 export function ImprovePanel({
   job,
   cv,
@@ -22,7 +20,6 @@ export function ImprovePanel({
   refresh: () => Promise<void>;
 }) {
   const imp = job.improve;
-  const [target, setTarget] = useState(imp?.target ?? 96);
   const [error, setError] = useState("");
   const [showDone, setShowDone] = useState(false);
   const improving = running && job.task?.kind === "improve";
@@ -41,9 +38,9 @@ export function ImprovePanel({
     saveAnswers().catch((e) => setError((e as Error).message));
   }, [answers]);
 
-  async function continueLoop() {
+  async function improveOnce() {
     await saveAnswers();
-    await run({ action: "improve", target });
+    await run({ action: "improve" });
   }
 
   async function decide(changeId: string, op: "keep" | "revert") {
@@ -64,28 +61,22 @@ export function ImprovePanel({
     <Section
       title={
         <>
-          Popraw automatycznie do celu {openCount ? <Badge tone="amber">{openCount} pytań do Ciebie</Badge> : null}{" "}
+          Popraw CV pod ocenę {openCount ? <Badge tone="amber">{openCount} pytań do Ciebie</Badge> : null}{" "}
           {pending.length ? <Badge tone="amber">{pending.length} zmian do przejrzenia</Badge> : null}
         </>
       }
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted">Cel:</span>
-        {TARGETS.map((t) => (
-          <button key={t} className={`btn btn-sm ${target === t ? "border-ink bg-ink text-white" : ""}`} onClick={() => setTarget(t)}>
-            {t}%
-          </button>
-        ))}
-        <button className="btn btn-sm btn-primary ml-auto" disabled={running} onClick={continueLoop}>
+        <p className="min-w-0 flex-1 text-xs leading-relaxed text-muted">
+          Jedna runda: Claude stosuje sugestie z oceny i ocenia CV ponownie (kilka minut). Używa tylko faktów z Twojej bazy i odpowiedzi. Rundę,
+          która obniży wynik, cofa sam. Przejrzyj zmiany i uruchom kolejną rundę, kiedy chcesz.
+        </p>
+        <button className="btn btn-sm btn-primary" disabled={running} onClick={improveOnce}>
           {improving ? <Spinner className="size-3" /> : null}
-          {imp?.rounds.length ? "Poprawiaj dalej" : "Popraw do celu"}
+          {imp?.rounds.length ? "Popraw jeszcze raz" : "Popraw CV"}
           {score !== undefined ? ` (teraz ${score}%)` : ""}
         </button>
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-muted">
-        Claude stosuje sugestie z oceny, ocenia CV ponownie i powtarza (do 3 rund na raz, ok. 3 min na rundę). Używa tylko faktów z Twojej bazy i
-        odpowiedzi. Rundę, która obniży wynik, cofa sam. Każdą zmianę możesz potem zostawić, cofnąć albo poprawić.
-      </p>
 
       {imp?.rounds.length || imp?.stopReason ? (
         <div className="mt-4 rounded-lg bg-canvas px-3 py-2.5 text-sm">
@@ -121,9 +112,9 @@ export function ImprovePanel({
               </div>
             ))}
           </div>
-          <button className="btn btn-sm btn-primary mt-3" disabled={running} onClick={continueLoop}>
+          <button className="btn btn-sm btn-primary mt-3" disabled={running} onClick={improveOnce}>
             {improving ? <Spinner className="size-3" /> : null}
-            Poprawiaj dalej z tymi odpowiedziami
+            Popraw jeszcze raz z tymi odpowiedziami
           </button>
         </div>
       ) : null}
