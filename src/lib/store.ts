@@ -2,7 +2,7 @@ import "server-only";
 import { promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
-import type { CvSource, Job, Profile, ProfileTask } from "./types";
+import type { CvSource, Fact, Job, Profile, ProfileTask } from "./types";
 
 export const ROOT = process.cwd();
 export const DATA_DIR = path.join(ROOT, "data");
@@ -12,6 +12,7 @@ export const TMP_DIR = path.join(DATA_DIR, "tmp");
 const PROFILE_FILE = path.join(DATA_DIR, "profile.json");
 const SOURCES_FILE = path.join(DATA_DIR, "cv-sources.json");
 const PROFILE_TASK_FILE = path.join(DATA_DIR, "profile-task.json");
+const FACTS_FILE = path.join(DATA_DIR, "facts.json");
 
 export function emptyProfile(): Profile {
   return {
@@ -131,6 +132,52 @@ export async function listJobs(): Promise<Job[]> {
 
 export async function deleteJob(id: string) {
   await fs.rm(jobDir(id), { recursive: true, force: true });
+}
+
+// ---------- Zapamiętane odpowiedzi (wspólne dla wszystkich ofert) ----------
+
+export async function getFacts(): Promise<Fact[]> {
+  return readJson<Fact[]>(FACTS_FILE, []);
+}
+
+let factsLock: Promise<unknown> = Promise.resolve();
+export async function updateFacts(fn: (f: Fact[]) => Fact[]) {
+  const next = factsLock.then(async () => {
+    const f = fn(await getFacts());
+    await writeJson(FACTS_FILE, f);
+    return f;
+  });
+  factsLock = next.catch(() => undefined);
+  return next;
+}
+
+/** Zbiera odpowiedzi z oferty (pytania z analizy, „czy to umiesz”, pytania z pętli poprawek) do wspólnej pamięci. */
+export async function syncJobFacts(job: Job) {
+  const source = [job.title, job.company].filter(Boolean).join(" – ") || job.url || "oferta";
+  const now = new Date().toISOString();
+  const items: Omit<Fact, "updatedAt" | "source">[] = [];
+  for (const q of job.analysis?.questions ?? [])
+    if (q.answer.trim()) items.push({ key: `${job.id}:q:${q.id}`, question: q.question, answer: q.answer.trim() });
+  for (const s of job.analysis?.skillSuggestions ?? [])
+    if (s.answer)
+      items.push({
+        key: `${job.id}:s:${s.name.toLowerCase()}`,
+        question: `Czy masz: ${s.name}?`,
+        answer: s.answer === "mam" ? `Tak${s.note.trim() ? ` – ${s.note.trim()}` : ""}` : "Nie",
+      });
+  for (const q of job.improve?.questions ?? [])
+    if (q.kind === "pytanie" && q.answer.trim()) items.push({ key: `${job.id}:i:${q.id}`, question: q.question, answer: q.answer.trim() });
+
+  const prefix = `${job.id}:`;
+  await updateFacts((all) => {
+    const byKey = new Map(all.map((f) => [f.key, f]));
+    const keep = all.filter((f) => !f.key.startsWith(prefix)); // odpowiedzi z tej oferty budujemy od nowa
+    for (const it of items) {
+      const old = byKey.get(it.key);
+      keep.push(old && old.answer === it.answer && old.question === it.question ? old : { ...it, source, updatedAt: now });
+    }
+    return keep;
+  });
 }
 
 // ---------- Zdjęcie ----------

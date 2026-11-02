@@ -1,4 +1,4 @@
-import { deleteJob, getJob, updateJob } from "@/lib/store";
+import { deleteJob, getJob, syncJobFacts, updateJob } from "@/lib/store";
 import type { Job } from "@/lib/types";
 
 const EDITABLE: (keyof Job)[] = ["title", "company", "status", "notes", "postingText", "userNotes", "analysis", "cv", "coverLetter", "url"];
@@ -19,6 +19,7 @@ export async function PATCH(req: Request, ctx: RouteContext<"/api/jobs/[id]">) {
     if ("cv" in patch && JSON.stringify(j.cv) !== cvBefore) j.pdf = undefined; // CV zmienione – stary PDF nieaktualny
     if (patch.clearTaskError && j.task?.status === "error") j.task = undefined;
   });
+  if ("analysis" in patch) await syncJobFacts(job);
   return Response.json(job);
 }
 

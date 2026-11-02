@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, Badge, Section, Spinner } from "@/components/ui";
+import { api, Area, Badge, Section, Spinner, useDebouncedEffect } from "@/components/ui";
 import { isValidPath, pathLabel } from "@/lib/cvpath";
 import type { CvChange, Job, TailoredCv } from "@/lib/types";
 
@@ -30,6 +30,22 @@ export function ImprovePanel({
   const done = imp?.changes.filter((c) => c.status !== "do przejrzenia") ?? [];
   const score = job.cvScore?.score;
 
+  // odpowiedzi na pytania z pętli – zapisywane na bieżąco (i do wspólnej pamięci odpowiedzi)
+  const questions = imp?.questions ?? [];
+  const facts = questions.filter((q) => q.kind === "pytanie");
+  const gaps = questions.filter((q) => q.kind === "brak");
+  const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(facts.map((q) => [q.id, q.answer])));
+  const openCount = facts.filter((q) => !(answers[q.id] ?? "").trim()).length;
+  const saveAnswers = () => api(`/api/jobs/${job.id}/improve-answers`, { method: "POST", json: { answers } });
+  useDebouncedEffect(() => {
+    saveAnswers().catch((e) => setError((e as Error).message));
+  }, [answers]);
+
+  async function continueLoop() {
+    await saveAnswers();
+    await run({ action: "improve", target });
+  }
+
   async function decide(changeId: string, op: "keep" | "revert") {
     setError("");
     try {
@@ -48,7 +64,8 @@ export function ImprovePanel({
     <Section
       title={
         <>
-          Popraw automatycznie do celu {pending.length ? <Badge tone="amber">{pending.length} zmian do przejrzenia</Badge> : null}
+          Popraw automatycznie do celu {openCount ? <Badge tone="amber">{openCount} pytań do Ciebie</Badge> : null}{" "}
+          {pending.length ? <Badge tone="amber">{pending.length} zmian do przejrzenia</Badge> : null}
         </>
       }
     >
@@ -59,7 +76,7 @@ export function ImprovePanel({
             {t}%
           </button>
         ))}
-        <button className="btn btn-sm btn-primary ml-auto" disabled={running} onClick={() => run({ action: "improve", target })}>
+        <button className="btn btn-sm btn-primary ml-auto" disabled={running} onClick={continueLoop}>
           {improving ? <Spinner className="size-3" /> : null}
           {imp?.rounds.length ? "Poprawiaj dalej" : "Popraw do celu"}
           {score !== undefined ? ` (teraz ${score}%)` : ""}
@@ -83,19 +100,43 @@ export function ImprovePanel({
             </p>
           ) : null}
           {imp?.stopReason ? <p className="mt-0.5">{imp.stopReason}</p> : null}
-          {imp?.blockers.length ? (
-            <div className="mt-2">
-              <p className="text-xs font-bold text-amber-900">Żeby wynik rósł dalej, Claude potrzebuje od Ciebie:</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs leading-relaxed">
-                {imp.blockers.map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
-              <p className="mt-1 text-xs text-muted">
-                Dopisz to w „Twoich wskazówkach” w zakładce Analiza albo w Bazie CV i kliknij „Poprawiaj dalej”.
-              </p>
-            </div>
-          ) : null}
+        </div>
+      ) : null}
+
+      {facts.length ? (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/40 p-3">
+          <p className="text-sm font-bold">Claude potrzebuje od Ciebie</p>
+          <p className="mb-3 text-xs text-muted">
+            Odpowiedz krótko (wystarczy przybliżona liczba). Pomiń, jeśli nie wiesz – nic nie zostanie zmyślone. Odpowiedzi zapamiętuję też dla
+            innych ofert.
+          </p>
+          <div className="grid gap-3">
+            {facts.map((q) => (
+              <div key={q.id}>
+                <p className="mb-1 flex gap-2 text-sm font-semibold leading-snug">
+                  <span className={(answers[q.id] ?? "").trim() ? "text-emerald-600" : "text-amber-500"}>{(answers[q.id] ?? "").trim() ? "✓" : "●"}</span>
+                  {q.question}
+                </p>
+                <Area value={answers[q.id] ?? ""} placeholder="Twoja odpowiedź" onChange={(v) => setAnswers((a) => ({ ...a, [q.id]: v }))} />
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-sm btn-primary mt-3" disabled={running} onClick={continueLoop}>
+            {improving ? <Spinner className="size-3" /> : null}
+            Poprawiaj dalej z tymi odpowiedziami
+          </button>
+        </div>
+      ) : null}
+
+      {gaps.length ? (
+        <div className="mt-3 rounded-lg bg-canvas px-3 py-2.5">
+          <p className="text-sm font-bold">Realne braki względem ogłoszenia</p>
+          <p className="mb-1.5 text-xs text-muted">Tego nie da się uczciwie dopisać. To normalne – nie każda oferta pasuje w 100%. Zdecyduj, czy mimo to aplikujesz.</p>
+          <ul className="list-disc space-y-0.5 pl-5 text-sm leading-relaxed">
+            {gaps.map((q) => (
+              <li key={q.id}>{q.question}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

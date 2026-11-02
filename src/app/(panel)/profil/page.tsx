@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Area, Elapsed, Field, LinesArea, Section, Spinner, useDebouncedEffect } from "@/components/ui";
-import type { CvSource, Profile, ProfileExperience, ProfileTask } from "@/lib/types";
+import type { CvSource, Fact, Profile, ProfileExperience, ProfileTask } from "@/lib/types";
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -376,6 +376,8 @@ export default function ProfilePage() {
           />
         </Section>
 
+        <RememberedAnswers />
+
         <Section title="Domyślna klauzula RODO">
           <Area rows={3} value={profile.gdpr} onChange={(v) => update((p) => void (p.gdpr = v))} />
         </Section>
@@ -415,5 +417,77 @@ function ExperienceEditor({
         onChange={(v) => onChange((e) => void (e.notes = v))}
       />
     </div>
+  );
+}
+
+/** Odpowiedzi z wszystkich ofert – Claude używa ich jak bazy i nie pyta o nie ponownie. */
+function RememberedAnswers() {
+  const [facts, setFacts] = useState<Fact[] | null>(null);
+  const [filter, setFilter] = useState("");
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    api<Fact[]>("/api/facts").then(setFacts);
+  }, []);
+  useDebouncedEffect(() => {
+    if (facts) api("/api/facts", { method: "PUT", json: facts });
+  }, [facts]);
+
+  if (!facts) return null;
+  const q = filter.trim().toLowerCase();
+  const list = facts
+    .map((f, i) => ({ f, i }))
+    .filter(({ f }) => !q || `${f.question} ${f.answer} ${f.source}`.toLowerCase().includes(q))
+    .reverse(); // najnowsze na górze
+  const shown = showAll || q ? list : list.slice(0, 8);
+
+  return (
+    <Section
+      title={
+        <>
+          Zapamiętane odpowiedzi <span className="text-sm font-semibold text-muted">({facts.length})</span>
+        </>
+      }
+      actions={
+        facts.length > 8 ? <input className="input w-56 py-1.5 text-sm" placeholder="Szukaj…" value={filter} onChange={(e) => setFilter(e.target.value)} /> : null
+      }
+    >
+      <p className="-mt-2 mb-3 text-xs text-muted">
+        Twoje odpowiedzi z analiz, „Czy to umiesz?” i poprawek CV. Zapisują się same i trafiają do każdej kolejnej oferty – Claude nie zapyta o nie
+        drugi raz. Popraw albo usuń, jeśli coś jest nieaktualne.
+      </p>
+      {facts.length === 0 ? (
+        <p className="text-sm text-muted">Jeszcze nic – pojawią się tu, gdy odpowiesz na pytania przy ofercie.</p>
+      ) : (
+        <ul className="grid gap-3 lg:grid-cols-2">
+          {shown.map(({ f, i }) => (
+            <li key={f.key} className="rounded-lg border border-line p-3">
+              <div className="flex items-start gap-2">
+                <p className="flex-1 text-sm font-semibold leading-snug">{f.question}</p>
+                <button
+                  className="btn btn-ghost btn-sm -mr-1 -mt-1 text-muted"
+                  title="Usuń"
+                  onClick={() => setFacts((all) => all!.filter((_, j) => j !== i))}
+                >
+                  ✕
+                </button>
+              </div>
+              <textarea
+                className="input mt-1.5 text-sm"
+                rows={2}
+                value={f.answer}
+                onChange={(e) => setFacts((all) => all!.map((x, j) => (j === i ? { ...x, answer: e.target.value } : x)))}
+              />
+              {f.source ? <p className="mt-1 text-xs text-muted">z oferty: {f.source}</p> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!q && list.length > 8 ? (
+        <button className="mt-3 text-sm font-semibold text-brand" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? "Pokaż mniej" : `Pokaż wszystkie (${list.length})`}
+        </button>
+      ) : null}
+    </Section>
   );
 }

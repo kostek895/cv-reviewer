@@ -4,6 +4,7 @@ import { fetchPosting } from "./fetch-posting";
 import { analysisSchema, cvScoreSchema, improveSchema, profileSchema, rewriteSchemas, tailorResultSchema } from "./schemas";
 import { getAt, isListPath, isValidPath, pathLabel, sameValue, setAt, type CvValue } from "./cvpath";
 import {
+  getFacts,
   getJob,
   getProfile,
   listSources,
@@ -13,7 +14,7 @@ import {
   sourcePath,
   updateJob,
 } from "./store";
-import type { CvChange, CvScore, Job, JobAnalysis, Profile, TailoredCv, TaskKind } from "./types";
+import type { CvChange, CvScore, ImproveQuestion, Job, JobAnalysis, Profile, TailoredCv, TaskKind } from "./types";
 import { renderPdf } from "./pdf";
 
 const MESSAGES: Record<TaskKind, string> = {
@@ -82,10 +83,19 @@ export async function doFetch(id: string) {
 
 // ---------- Analiza ----------
 
-function profileForPrompt(p: Profile) {
+/** Baza kandydata + zapamiętane odpowiedzi ze wszystkich ofert. */
+async function profileForPrompt(p: Profile) {
   const { updatedAt: _u, ...rest } = p;
   void _u;
-  return JSON.stringify(rest, null, 1);
+  const facts = await getFacts();
+  return JSON.stringify(
+    {
+      ...rest,
+      zapamietane_odpowiedzi: facts.map((f) => ({ pytanie: f.question, odpowiedz: f.answer, z_oferty: f.source })),
+    },
+    null,
+    1
+  );
 }
 
 export async function doAnalyze(id: string) {
@@ -98,7 +108,7 @@ ${job.postingText}
 </ogloszenie>
 
 <baza_kandydata>
-${profileForPrompt(profile)}
+${await profileForPrompt(profile)}
 </baza_kandydata>`;
   const res = await runSkill<
     Omit<JobAnalysis, "questions" | "skillSuggestions"> & {
@@ -156,7 +166,7 @@ ${job.userNotes || "(brak)"}
 </uwagi_kandydata>
 
 <baza_kandydata>
-${profileForPrompt(profile)}
+${await profileForPrompt(profile)}
 </baza_kandydata>`;
   const res = await runSkill<{ cv: Omit<TailoredCv, "showPhoto">; coverLetter: string; changeNotes: string[] }>({
     skill: "cv-tailor",
@@ -211,7 +221,7 @@ ${JSON.stringify(job.cv, null, 1)}
 </cale_cv_dla_kontekstu>
 
 <baza_kandydata>
-${profileForPrompt(profile)}
+${await profileForPrompt(profile)}
 </baza_kandydata>`;
   const res = await runSkill<{ value: unknown }>({
     skill: "cv-rewrite",
@@ -272,7 +282,7 @@ ${job.coverLetter || "(brak)"}
 </list_motywacyjny>
 
 <baza_kandydata uwaga="tylko do sugestii – oceniasz to, co jest w CV">
-${profileForPrompt(await getProfile())}
+${await profileForPrompt(await getProfile())}
 </baza_kandydata>
 
 <uwagi_kandydata>
@@ -315,16 +325,38 @@ export async function doImprove(id: string, target: number) {
   if (!job.cv || !job.analysis) throw new Error("Najpierw napisz CV");
   const profile = await getProfile();
 
-  const stop = async (reason: string, blockers?: string[]) => {
+  const stop = async (reason: string) => {
+    await updateJob(id, (j) => {
+      if (j.improve) j.improve.stopReason = reason;
+    });
+  };
+  // nowe pytania zastępują te bez odpowiedzi; odpowiedziane zostają (to już fakty)
+  const mergeQuestions = async (qs: { question: string; kind: ImproveQuestion["kind"] }[]) => {
     await updateJob(id, (j) => {
       if (!j.improve) return;
-      j.improve.stopReason = reason;
-      if (blockers) j.improve.blockers = blockers;
+      const answered = (j.improve.questions ?? []).filter((q) => q.kind === "pytanie" && q.answer.trim());
+      const seen = new Set(answered.map((q) => q.question.trim().toLowerCase()));
+      const fresh = qs
+        .filter((q) => q.question.trim() && !seen.has(q.question.trim().toLowerCase()))
+        .map((q) => ({ id: newChangeId(), question: q.question.trim(), kind: q.kind, answer: "" }));
+      j.improve.questions = [...answered, ...fresh];
     });
+  };
+  const openQuestions = async () =>
+    ((await getJob(id))?.improve?.questions ?? []).filter((q) => q.kind === "pytanie" && !q.answer.trim()).length;
+  const askOrStop = async (reason: string) => {
+    const n = await openQuestions();
+    return stop(n ? `${reason} Odpowiedz na ${n} ${n === 1 ? "pytanie" : "pytania"} poniżej i kliknij „Poprawiaj dalej”.` : reason);
   };
 
   await updateJob(id, (j) => {
-    j.improve = { target, rounds: j.improve?.rounds ?? [], changes: j.improve?.changes ?? [], blockers: [], stopReason: undefined };
+    j.improve = {
+      target,
+      rounds: j.improve?.rounds ?? [],
+      changes: j.improve?.changes ?? [],
+      questions: (j.improve?.questions ?? []).filter((q) => q.kind === "pytanie" && q.answer.trim()),
+      stopReason: undefined,
+    };
   });
 
   if (!job.cvScore || job.cvScore.cvSnapshot !== cvSnapshot(job.cv)) {
@@ -369,14 +401,18 @@ ${job.userNotes || "(brak)"}
 </uwagi_kandydata>
 
 <baza_kandydata>
-${profileForPrompt(profile)}
+${await profileForPrompt(profile)}
 </baza_kandydata>`;
-    const res = await runSkill<{ changes: { path: string; text: string; list: string[]; reason: string }[]; blockers: string[] }>({
+    const res = await runSkill<{
+      changes: { path: string; text: string; list: string[]; reason: string }[];
+      questions: { question: string; kind: ImproveQuestion["kind"] }[];
+    }>({
       skill: "cv-improve",
       prompt,
       schema: improveSchema,
       tools: [],
     });
+    await mergeQuestions(res.questions);
 
     const applied: CvChange[] = [];
     await updateJob(id, (j) => {
@@ -397,9 +433,10 @@ ${profileForPrompt(profile)}
     });
     if (!applied.length) {
       await updateJob(id, (j) => void j.improve?.rounds.pop());
-      return stop(
-        `Claude nie widzi już poprawek opartych na Twoich faktach (wynik ${before.score}%).`,
-        res.blockers
+      return askOrStop(
+        (await openQuestions())
+          ? `Bez nowych faktów Claude nie ma już czego poprawić (wynik ${before.score}%).`
+          : `Claude nie widzi już poprawek opartych na Twoich faktach (wynik ${before.score}%). Pozostałe różnice to realne braki – to w porządku, nie każda oferta pasuje w 100%.`
       );
     }
 
@@ -422,16 +459,18 @@ ${profileForPrompt(profile)}
         r.reverted = true;
         j.cvScore = before;
       });
-      return stop(`Runda ${round} obniżyła wynik (${before.score}% → ${after}%), więc ją cofnąłem.`, res.blockers);
+      return askOrStop(`Runda ${round} obniżyła wynik (${before.score}% → ${after}%), więc ją cofnąłem.`);
     }
 
     await updateJob(id, (j) => {
       const r = j.improve?.rounds.at(-1);
       if (r) r.scoreAfter = after;
-      if (j.improve) j.improve.blockers = res.blockers;
     });
-    if (after >= target) return stop(`Cel osiągnięty: ${after}%.`, res.blockers);
-    if (after - before.score < 2) return stop(`Wynik przestał rosnąć (${before.score}% → ${after}%).`, res.blockers);
+    if (after >= target) return stop(`Cel osiągnięty: ${after}%.`);
+    // po każdej rundzie z brakującymi faktami – zatrzymaj się i zapytaj kandydata
+    if (await openQuestions()) return askOrStop(`Runda ${round}: ${before.score}% → ${after}%.`);
+    if (after - before.score < 2)
+      return stop(`Wynik przestał rosnąć (${before.score}% → ${after}%). Pozostałe różnice to realne braki – to w porządku, nie każda oferta pasuje w 100%.`);
   }
   return stop(`Limit ${MAX_ROUNDS} rund w jednym przebiegu – wynik ${job.cvScore!.score}%. Możesz uruchomić kolejny.`);
 }
@@ -473,7 +512,7 @@ ${JSON.stringify(job.cv, null, 1)}
 </cale_cv_dla_kontekstu>
 
 <baza_kandydata>
-${profileForPrompt(profile)}
+${await profileForPrompt(profile)}
 </baza_kandydata>`;
   const res = await runSkill<{ value: CvValue }>({
     skill: "cv-rewrite",
@@ -539,7 +578,7 @@ Pliki CV do przeczytania (użyj narzędzia Read na każdym):
 ${files.map((f) => `- ${f}`).join("\n")}
 
 <aktualna_baza>
-${profileForPrompt(profile)}
+${await profileForPrompt(profile)}
 </aktualna_baza>`;
       const res = await runSkill<Profile>({ skill: "cv-import", prompt, schema: profileSchema, tools: ["Read"] });
       // pole notes należy do użytkownika – nie pozwól go nadpisać

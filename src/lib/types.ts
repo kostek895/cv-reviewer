@@ -193,12 +193,28 @@ export interface CvChange {
   comment?: string; // ostatnia uwaga kandydata do tej zmiany
 }
 
+export interface ImproveQuestion {
+  id: string;
+  question: string;
+  kind: "pytanie" | "brak"; // pytanie o fakt albo realny brak do zaakceptowania
+  answer: string;
+}
+
 export interface ImproveState {
   target: number;
   rounds: { round: number; scoreBefore: number; scoreAfter?: number; reverted?: boolean }[];
   changes: CvChange[];
   stopReason?: string;
-  blockers: string[]; // czego brakuje, żeby wynik rósł dalej
+  questions?: ImproveQuestion[]; // czego Claude potrzebuje od kandydata, żeby wynik rósł dalej
+}
+
+/** Odpowiedź kandydata zapamiętana dla wszystkich ofert. */
+export interface Fact {
+  key: string; // "<jobId>:q:<id>" itp. – pozwala aktualizować tę samą odpowiedź
+  question: string;
+  answer: string;
+  source: string; // z jakiej oferty pochodzi
+  updatedAt: string;
 }
 
 export interface Job {
