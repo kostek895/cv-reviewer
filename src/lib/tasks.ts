@@ -14,7 +14,7 @@ import {
   sourcePath,
   updateJob,
 } from "./store";
-import type { CvChange, CvScore, ImproveQuestion, Job, JobAnalysis, Profile, TailoredCv, TaskKind } from "./types";
+import type { CvChange, CvScore, Job, JobAnalysis, Profile, TailoredCv, TaskKind } from "./types";
 import { renderPdf } from "./pdf";
 
 const MESSAGES: Record<TaskKind, string> = {
@@ -24,15 +24,9 @@ const MESSAGES: Record<TaskKind, string> = {
   rewrite: "Claude poprawia sekcję…",
   pdf: "Generuję PDF…",
   score: "Claude ocenia CV względem ogłoszenia (zwykle 1–2 min)…",
-  improve: "Claude poprawia CV i ocenia je ponownie…",
-  refine: "Claude poprawia fragment według Twojej uwagi…",
+  improve: "Claude szuka poprawek CV (zwykle 2–3 min)…",
+  refine: "Claude przeredagowuje propozycję według Twojej uwagi…",
 };
-
-async function setTaskMessage(id: string, message: string) {
-  await updateJob(id, (j) => {
-    if (j.task?.status === "running") j.task.message = message;
-  });
-}
 
 /** Odpala zadanie w tle; stan zadania zapisuje w job.task (UI go odpytuje). */
 export async function startJobTask(id: string, kind: TaskKind, work: () => Promise<void>) {
@@ -176,6 +170,8 @@ ${await profileForPrompt(profile)}
   });
   await updateJob(id, (j) => {
     j.cv = { ...res.cv, showPhoto: j.cv?.showPhoto ?? true, accent: j.cv?.accent };
+    // nowe CV – propozycje do starej wersji tracą sens
+    if (j.improve) j.improve.changes = j.improve.changes.filter((c) => c.status !== "do przejrzenia");
     j.coverLetter = res.coverLetter;
     j.changeNotes = res.changeNotes;
     j.pdf = undefined;
@@ -316,81 +312,43 @@ ${JSON.stringify(
   });
 }
 
-// ---------- Jedna runda poprawek (popraw → oceń), iterowana ręcznie ----------
+// ---------- Propozycje poprawek (kandydat zatwierdza / odrzuca) ----------
 
-export async function doImprove(id: string, target = 100) {
-  let job = (await getJob(id))!;
+/** Jedna runda: Claude proponuje poprawki CV. Nic nie zmienia w CV, dopóki kandydat ich nie zatwierdzi. */
+export async function doImprove(id: string) {
+  const job = (await getJob(id))!;
   if (!job.cv || !job.analysis) throw new Error("Najpierw napisz CV");
+  const cv = job.cv;
   const profile = await getProfile();
-
-  const stop = async (reason: string) => {
-    await updateJob(id, (j) => {
-      if (j.improve) j.improve.stopReason = reason;
-    });
-  };
-  // nowe pytania zastępują te bez odpowiedzi; odpowiedziane zostają (to już fakty)
-  const mergeQuestions = async (qs: { question: string; kind: ImproveQuestion["kind"] }[]) => {
-    await updateJob(id, (j) => {
-      if (!j.improve) return;
-      const answered = (j.improve.questions ?? []).filter((q) => q.kind === "pytanie" && q.answer.trim());
-      const seen = new Set(answered.map((q) => q.question.trim().toLowerCase()));
-      const fresh = qs
-        .filter((q) => q.question.trim() && !seen.has(q.question.trim().toLowerCase()))
-        .map((q) => ({ id: newChangeId(), question: q.question.trim(), kind: q.kind, answer: "" }));
-      j.improve.questions = [...answered, ...fresh];
-    });
-  };
-  const openQuestions = async () =>
-    ((await getJob(id))?.improve?.questions ?? []).filter((q) => q.kind === "pytanie" && !q.answer.trim()).length;
-  const askOrStop = async (reason: string) => {
-    const n = await openQuestions();
-    return stop(n ? `${reason} Odpowiedz na ${n} ${n === 1 ? "pytanie" : "pytania"} poniżej i kliknij „Popraw jeszcze raz”.` : reason);
-  };
-
-  await updateJob(id, (j) => {
-    j.improve = {
-      target,
-      rounds: j.improve?.rounds ?? [],
-      changes: j.improve?.changes ?? [],
-      questions: (j.improve?.questions ?? []).filter((q) => q.kind === "pytanie" && q.answer.trim()),
-      stopReason: undefined,
-    };
-  });
-
-  if (!job.cvScore || job.cvScore.cvSnapshot !== cvSnapshot(job.cv)) {
-    await setTaskMessage(id, "Oceniam aktualne CV…");
-    await doScore(id);
-    job = (await getJob(id))!;
-  }
-
-  const before = job.cvScore!;
-  if (before.score >= target) return stop(`CV ma już ${before.score}%.`);
   const round = (job.improve?.rounds.at(-1)?.round ?? 0) + 1;
-  await setTaskMessage(id, `Runda ${round}: Claude wprowadza poprawki (teraz ${before.score}%)…`);
+  const score = job.cvScore;
+  const scoreFresh = score && score.cvSnapshot === cvSnapshot(cv);
 
+  // odrzucone przez kandydata (bez zmian cofniętych automatycznie w starej pętli z oceną)
+  const autoReverted = new Set((job.improve?.rounds ?? []).filter((r) => r.reverted).map((r) => r.round));
   const rejected = (job.improve?.changes ?? [])
-    .filter((c) => c.status === "cofnięta")
-    .map((c) => ({ pole: pathLabel(job.cv!, c.path), odrzucona_wersja: c.after, komentarz: c.comment ?? "" }));
-  const prompt = `Przeprowadź jedną rundę poprawek zgodnie z instrukcją skilla cv-improve. Cel: ${target}/100.
-
-<ocena_cv wynik="${before.score}">
-${JSON.stringify({ comment: before.comment, suggestions: before.suggestions, missingKeywords: before.missingKeywords, requirements: before.requirements }, null, 1)}
-</ocena_cv>
-
-<odrzucone>
-${rejected.length ? JSON.stringify(rejected, null, 1) : "(brak)"}
-</odrzucone>
+    .filter((c) => c.status === "cofnięta" && (c.comment || !autoReverted.has(c.round)))
+    .map((c) => ({ pole: isValidPath(cv, c.path) ? pathLabel(cv, c.path) : c.path, odrzucona_wersja: c.after, komentarz: c.comment ?? "" }));
+  const prompt = `Zaproponuj poprawki CV zgodnie z instrukcją skilla cv-improve.
 
 <cv>
-${JSON.stringify(job.cv, null, 1)}
+${JSON.stringify(cv, null, 1)}
 </cv>
+
+<ostatnia_ocena_cv ${score ? `wynik="${score.score}" aktualna="${scoreFresh ? "tak" : "nie – CV zmieniło się od oceny"}"` : ""}>
+${score ? JSON.stringify({ comment: score.comment, suggestions: score.suggestions, missingKeywords: score.missingKeywords, requirements: score.requirements }, null, 1) : "(brak oceny)"}
+</ostatnia_ocena_cv>
+
+<odrzucone_propozycje>
+${rejected.length ? JSON.stringify(rejected, null, 1) : "(brak)"}
+</odrzucone_propozycje>
 
 <ogloszenie url="${job.url}">
 ${job.postingText}
 </ogloszenie>
 
 <analiza_i_rekomendacje>
-${analysisForPrompt(job.analysis!)}
+${analysisForPrompt(job.analysis)}
 </analiza_i_rekomendacje>
 
 <uwagi_kandydata>
@@ -400,95 +358,65 @@ ${job.userNotes || "(brak)"}
 <baza_kandydata>
 ${await profileForPrompt(profile)}
 </baza_kandydata>`;
-  const res = await runSkill<{
-    changes: { path: string; text: string; list: string[]; reason: string }[];
-    questions: { question: string; kind: ImproveQuestion["kind"] }[];
-  }>({
+  const res = await runSkill<{ changes: { path: string; text: string; list: string[]; reason: string }[] }>({
     skill: "cv-improve",
     prompt,
     schema: improveSchema,
     tools: [],
   });
-  await mergeQuestions(res.questions);
 
-  const applied: CvChange[] = [];
   await updateJob(id, (j) => {
-    if (!j.cv || !j.improve) return;
-    const seen = new Set<string>();
-    for (const c of res.changes) {
-      if (!isValidPath(j.cv, c.path) || seen.has(c.path)) continue;
-      const after: CvValue = isListPath(c.path) ? c.list.map((x) => x.trim()).filter(Boolean) : c.text.trim();
-      const prev = getAt(j.cv, c.path);
-      if (!after.length || sameValue(prev, after)) continue;
-      seen.add(c.path);
-      setAt(j.cv, c.path, after);
-      applied.push({ id: newChangeId(), round, path: c.path, before: prev, after, reason: c.reason, status: "do przejrzenia" });
-    }
-    j.improve.changes.push(...applied);
-    j.improve.rounds.push({ round, scoreBefore: before.score });
-    j.pdf = undefined;
-  });
-  if (!applied.length) {
-    await updateJob(id, (j) => void j.improve?.rounds.pop());
-    return askOrStop(
-      (await openQuestions())
-        ? `Bez nowych faktów Claude nie ma już czego poprawić (wynik ${before.score}%).`
-        : `Claude nie widzi już poprawek opartych na Twoich faktach (wynik ${before.score}%). Pozostałe różnice to realne braki – to w porządku, nie każda oferta pasuje w 100%.`
+    if (!j.cv) return;
+    const jcv = j.cv;
+    const prev = j.improve;
+    // niezatwierdzone propozycje z poprzedniej rundy zastępuje nowa runda
+    const kept = (prev?.changes ?? []).filter(
+      (c) => c.status !== "do przejrzenia" || (isValidPath(jcv, c.path) && sameValue(getAt(jcv, c.path), c.after))
     );
-  }
-
-  await setTaskMessage(id, `Runda ${round}: oceniam CV po ${applied.length} poprawkach…`);
-  await doScore(id);
-  job = (await getJob(id))!;
-  const after = job.cvScore!.score;
-
-  if (after < before.score) {
-    // runda pogorszyła wynik – przywróć poprzednią wersję i poprzednią ocenę
-    await updateJob(id, (j) => {
-      if (!j.cv || !j.improve) return;
-      for (const c of applied) {
-        setAt(j.cv, c.path, c.before);
-        const ch = j.improve.changes.find((x) => x.id === c.id);
-        if (ch) ch.status = "cofnięta";
-      }
-      const r = j.improve.rounds.at(-1)!;
-      r.scoreAfter = after;
-      r.reverted = true;
-      j.cvScore = before;
-    });
-    return askOrStop(`Runda ${round} obniżyła wynik (${before.score}% → ${after}%), więc ją cofnąłem.`);
-  }
-
-  await updateJob(id, (j) => {
-    const r = j.improve?.rounds.at(-1);
-    if (r) r.scoreAfter = after;
+    const seen = new Set<string>();
+    const proposals: CvChange[] = [];
+    for (const c of res.changes) {
+      if (!isValidPath(jcv, c.path) || seen.has(c.path)) continue;
+      const after: CvValue = isListPath(c.path) ? c.list.map((x) => x.trim()).filter(Boolean) : c.text.trim();
+      const before = getAt(jcv, c.path);
+      if (!after.length || sameValue(before, after)) continue;
+      seen.add(c.path);
+      proposals.push({ id: newChangeId(), round, path: c.path, before, after, reason: c.reason, status: "do przejrzenia" });
+    }
+    j.improve = {
+      target: 100,
+      rounds: [...(prev?.rounds ?? []), { round, scoreBefore: j.cvScore?.score ?? 0 }],
+      changes: [...kept, ...proposals],
+      questions: prev?.questions,
+      stopReason: proposals.length
+        ? undefined
+        : "Claude nie widzi już poprawek opartych na Twoich faktach – to najlepsza wersja tego CV, jaką da się uczciwie napisać.",
+    };
   });
-  return askOrStop(`Runda ${round}: ${before.score}% → ${after}%. Przejrzyj zmiany i w razie potrzeby uruchom kolejną rundę.`);
 }
 
 const newChangeId = () => Math.random().toString(36).slice(2, 10);
 
-/** Poprawia jedną zmianę według uwagi kandydata. */
+/** Przeredaguj propozycję według uwagi kandydata (wynik to nadal propozycja do zatwierdzenia). */
 export async function doRefine(id: string, changeId: string, comment: string) {
   const job = (await getJob(id))!;
   const ch = job.improve?.changes.find((c) => c.id === changeId);
-  if (!job.cv || !job.analysis || !ch) throw new Error("Nie znaleziono zmiany");
+  if (!job.cv || !job.analysis || !ch) throw new Error("Nie znaleziono propozycji");
   if (!isValidPath(job.cv, ch.path)) throw new Error("Ten fragment CV już nie istnieje");
   const profile = await getProfile();
-  const current = getAt(job.cv, ch.path);
   const prompt = `Popraw jeden fragment CV zgodnie z instrukcją skilla cv-rewrite.
 
-<fragment nazwa="${pathLabel(job.cv, ch.path)}" jezyk_cv="${job.cv.lang}">
-${JSON.stringify({ value: current }, null, 1)}
+<fragment nazwa="${pathLabel(job.cv, ch.path)}" jezyk_cv="${job.cv.lang}" uwaga="to propozycja nowej wersji – popraw ją według uwagi kandydata">
+${JSON.stringify({ value: ch.after }, null, 1)}
 </fragment>
 
-<wersja_sprzed_automatycznej_poprawki>
+<obecna_wersja_w_cv>
 ${JSON.stringify(ch.before, null, 1)}
-</wersja_sprzed_automatycznej_poprawki>
+</obecna_wersja_w_cv>
 
-<powod_automatycznej_poprawki>
+<powod_propozycji>
 ${ch.reason}
-</powod_automatycznej_poprawki>
+</powod_propozycji>
 
 <uwaga_kandydata>
 ${comment}
@@ -514,35 +442,48 @@ ${await profileForPrompt(profile)}
   await updateJob(id, (j) => {
     const c = j.improve?.changes.find((x) => x.id === changeId);
     if (!j.cv || !c) return;
-    setAt(j.cv, c.path, res.value);
+    // jeśli propozycja jest już w CV (zatwierdzona), podmień też treść w CV
+    if (isValidPath(j.cv, c.path) && sameValue(getAt(j.cv, c.path), c.after)) {
+      setAt(j.cv, c.path, res.value);
+      j.pdf = undefined;
+    }
     c.after = res.value;
     c.comment = comment;
-    c.status = "do przejrzenia";
-    j.pdf = undefined;
   });
 }
 
-/** Zostaw / cofnij zmianę (bez Claude'a). */
+/** Zatwierdź (wstaw do CV) albo odrzuć / cofnij propozycję. Bez Claude'a. */
 export async function decideChange(id: string, changeId: string | "all", op: "keep" | "revert") {
   return updateJob(id, (j) => {
-    if (!j.cv || !j.improve) throw new Error("Brak zmian");
-    const list = changeId === "all" ? j.improve.changes.filter((c) => c.status === "do przejrzenia") : j.improve.changes.filter((c) => c.id === changeId);
-    if (!list.length) throw new Error("Nie znaleziono zmiany");
+    if (!j.cv || !j.improve) throw new Error("Brak propozycji");
+    const cv = j.cv;
+    const fresh = (c: CvChange) => isValidPath(cv, c.path) && (sameValue(getAt(cv, c.path), c.before) || sameValue(getAt(cv, c.path), c.after));
+    const list =
+      changeId === "all"
+        ? j.improve.changes.filter((c) => c.status === "do przejrzenia" && fresh(c))
+        : j.improve.changes.filter((c) => c.id === changeId);
+    if (!list.length) throw new Error("Nie znaleziono propozycji");
     for (const c of list) {
-      if (op === "keep") {
-        c.status = "zostawiona";
-        continue;
-      }
       if (!isValidPath(j.cv, c.path)) throw new Error("Ten fragment CV już nie istnieje");
-      if (!sameValue(getAt(j.cv, c.path), c.after))
-        throw new Error(`„${pathLabel(j.cv, c.path)}” zmieniłeś ręcznie po tej poprawce – cofnij go ręcznie w edytorze.`);
-      setAt(j.cv, c.path, c.before);
-      c.status = "cofnięta";
-      j.pdf = undefined;
+      const current = getAt(j.cv, c.path);
+      const label = pathLabel(j.cv, c.path);
+      if (op === "keep") {
+        if (!sameValue(current, c.after)) {
+          if (!sameValue(current, c.before)) throw new Error(`„${label}” zmieniło się po tej propozycji – odrzuć ją i wygeneruj nowe propozycje.`);
+          setAt(j.cv, c.path, c.after);
+          j.pdf = undefined;
+        }
+        c.status = "zostawiona";
+      } else {
+        if (sameValue(current, c.after)) {
+          setAt(j.cv, c.path, c.before);
+          j.pdf = undefined;
+        }
+        c.status = "cofnięta";
+      }
     }
   });
 }
-
 
 // ---------- PDF ----------
 

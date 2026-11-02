@@ -1,11 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { api, Area, Badge, Section, Spinner, useDebouncedEffect } from "@/components/ui";
-import { isValidPath, pathLabel } from "@/lib/cvpath";
+import { api, Badge, Section, Spinner } from "@/components/ui";
+import { getAt, isValidPath, pathLabel, sameValue } from "@/lib/cvpath";
 import type { CvChange, Job, TailoredCv } from "@/lib/types";
 
-/** Ręczne rundy „popraw → oceń” + przegląd każdej zmiany. */
+const STATUS_LABEL: Record<CvChange["status"], string> = {
+  "do przejrzenia": "propozycja",
+  zostawiona: "zatwierdzona",
+  cofnięta: "odrzucona",
+};
+
+/** Propozycje poprawek CV – każdą zatwierdzasz, odrzucasz albo każesz przeredagować. */
 export function ImprovePanel({
   job,
   cv,
@@ -23,25 +29,12 @@ export function ImprovePanel({
   const [error, setError] = useState("");
   const [showDone, setShowDone] = useState(false);
   const improving = running && job.task?.kind === "improve";
-  const pending = imp?.changes.filter((c) => c.status === "do przejrzenia") ?? [];
+  // propozycja jest aktualna, dopóki pole w CV wygląda tak jak w „było” (albo już jak w „jest”)
+  const isCurrent = (c: CvChange) => isValidPath(cv, c.path) && (sameValue(getAt(cv, c.path), c.before) || sameValue(getAt(cv, c.path), c.after));
+  const open = imp?.changes.filter((c) => c.status === "do przejrzenia") ?? [];
+  const pending = open.filter(isCurrent);
+  const stale = open.length - pending.length;
   const done = imp?.changes.filter((c) => c.status !== "do przejrzenia") ?? [];
-  const score = job.cvScore?.score;
-
-  // odpowiedzi na pytania z pętli – zapisywane na bieżąco (i do wspólnej pamięci odpowiedzi)
-  const questions = imp?.questions ?? [];
-  const facts = questions.filter((q) => q.kind === "pytanie");
-  const gaps = questions.filter((q) => q.kind === "brak");
-  const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(facts.map((q) => [q.id, q.answer])));
-  const openCount = facts.filter((q) => !(answers[q.id] ?? "").trim()).length;
-  const saveAnswers = () => api(`/api/jobs/${job.id}/improve-answers`, { method: "POST", json: { answers } });
-  useDebouncedEffect(() => {
-    saveAnswers().catch((e) => setError((e as Error).message));
-  }, [answers]);
-
-  async function improveOnce() {
-    await saveAnswers();
-    await run({ action: "improve" });
-  }
 
   async function decide(changeId: string, op: "keep" | "revert") {
     setError("");
@@ -53,94 +46,53 @@ export function ImprovePanel({
     }
   }
 
-  const chain = imp?.rounds.length
-    ? [imp.rounds[0].scoreBefore, ...imp.rounds.map((r) => (r.reverted ? null : r.scoreAfter)).filter((x): x is number => x != null)]
-    : [];
-
   return (
     <Section
       title={
         <>
-          Popraw CV pod ocenę {openCount ? <Badge tone="amber">{openCount} pytań do Ciebie</Badge> : null}{" "}
-          {pending.length ? <Badge tone="amber">{pending.length} zmian do przejrzenia</Badge> : null}
+          Propozycje poprawek {pending.length ? <Badge tone="amber">{pending.length} do decyzji</Badge> : null}
         </>
       }
     >
       <div className="flex flex-wrap items-center gap-2">
         <p className="min-w-0 flex-1 text-xs leading-relaxed text-muted">
-          Jedna runda: Claude stosuje sugestie z oceny i ocenia CV ponownie (kilka minut). Używa tylko faktów z Twojej bazy i odpowiedzi. Rundę,
-          która obniży wynik, cofa sam. Przejrzyj zmiany i uruchom kolejną rundę, kiedy chcesz.
+          Claude szuka, co jeszcze wzmocni CV na podstawie Twoich umiejętności, doświadczenia i wykształcenia. Niczego nie zmienia sam – każdą
+          propozycję zatwierdzasz albo odrzucasz. Odrzuconych nie proponuje ponownie. Wynik sprawdzasz, kiedy chcesz, przyciskiem „Sprawdź
+          dopasowanie”.
         </p>
-        <button className="btn btn-sm btn-primary" disabled={running} onClick={improveOnce}>
+        <button className="btn btn-sm btn-primary" disabled={running} onClick={() => run({ action: "improve" })}>
           {improving ? <Spinner className="size-3" /> : null}
-          {imp?.rounds.length ? "Popraw jeszcze raz" : "Popraw CV"}
-          {score !== undefined ? ` (teraz ${score}%)` : ""}
+          {pending.length ? "Nowe propozycje" : "Zaproponuj poprawki"}
         </button>
       </div>
-
-      {imp?.rounds.length || imp?.stopReason ? (
-        <div className="mt-4 rounded-lg bg-canvas px-3 py-2.5 text-sm">
-          {chain.length > 1 ? (
-            <p className="flex flex-wrap items-center gap-1.5 font-bold">
-              {chain.map((s, i) => (
-                <span key={i} className="flex items-center gap-1.5">
-                  {i ? <span className="text-muted">→</span> : null}
-                  <span className={i === chain.length - 1 ? "text-emerald-700" : "text-muted"}>{s}%</span>
-                </span>
-              ))}
-            </p>
-          ) : null}
-          {imp?.stopReason ? <p className="mt-0.5">{imp.stopReason}</p> : null}
-        </div>
+      {pending.length && !improving ? (
+        <p className="mt-1.5 text-xs text-muted">„Nowe propozycje” zastąpią te, o których jeszcze nie zdecydowałeś.</p>
       ) : null}
 
-      {facts.length ? (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/40 p-3">
-          <p className="text-sm font-bold">Claude potrzebuje od Ciebie</p>
-          <p className="mb-3 text-xs text-muted">
-            Odpowiedz krótko (wystarczy przybliżona liczba). Pomiń, jeśli nie wiesz – nic nie zostanie zmyślone. Odpowiedzi zapamiętuję też dla
-            innych ofert.
-          </p>
-          <div className="grid gap-3">
-            {facts.map((q) => (
-              <div key={q.id}>
-                <p className="mb-1 flex gap-2 text-sm font-semibold leading-snug">
-                  <span className={(answers[q.id] ?? "").trim() ? "text-emerald-600" : "text-amber-500"}>{(answers[q.id] ?? "").trim() ? "✓" : "●"}</span>
-                  {q.question}
-                </p>
-                <Area value={answers[q.id] ?? ""} placeholder="Twoja odpowiedź" onChange={(v) => setAnswers((a) => ({ ...a, [q.id]: v }))} />
-              </div>
-            ))}
-          </div>
-          <button className="btn btn-sm btn-primary mt-3" disabled={running} onClick={improveOnce}>
-            {improving ? <Spinner className="size-3" /> : null}
-            Popraw jeszcze raz z tymi odpowiedziami
-          </button>
-        </div>
+      {stale ? (
+        <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50/40 px-3 py-2.5 text-sm">
+          {stale === 1 ? "1 propozycja dotyczyła" : `${stale} propozycji dotyczyło`} starszej wersji CV (zmieniłeś je potem), więc ją ukrywam. Kliknij
+          „Zaproponuj poprawki”, żeby dostać propozycje do obecnej wersji.
+        </p>
       ) : null}
 
-      {gaps.length ? (
-        <div className="mt-3 rounded-lg bg-canvas px-3 py-2.5">
-          <p className="text-sm font-bold">Realne braki względem ogłoszenia</p>
-          <p className="mb-1.5 text-xs text-muted">Tego nie da się uczciwie dopisać. To normalne – nie każda oferta pasuje w 100%. Zdecyduj, czy mimo to aplikujesz.</p>
-          <ul className="list-disc space-y-0.5 pl-5 text-sm leading-relaxed">
-            {gaps.map((q) => (
-              <li key={q.id}>{q.question}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      {imp?.stopReason && !pending.length && !stale ? <p className="mt-4 rounded-lg bg-canvas px-3 py-2.5 text-sm">{imp.stopReason}</p> : null}
 
       {error ? <p className="mt-3 text-sm font-semibold text-rose-600">{error}</p> : null}
 
       {pending.length ? (
         <div className="mt-4">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="label mb-0">Do przejrzenia</span>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="label mb-0">Do decyzji</span>
             {pending.length > 1 ? (
-              <button className="btn btn-sm ml-auto" disabled={running} onClick={() => decide("all", "keep")}>
-                Zostaw wszystkie
-              </button>
+              <span className="ml-auto flex gap-1.5">
+                <button className="btn btn-sm" disabled={running} onClick={() => decide("all", "keep")}>
+                  Zatwierdź wszystkie
+                </button>
+                <button className="btn btn-sm" disabled={running} onClick={() => decide("all", "revert")}>
+                  Odrzuć wszystkie
+                </button>
+              </span>
             ) : null}
           </div>
           <ul className="grid gap-3">
@@ -154,7 +106,9 @@ export function ImprovePanel({
       {done.length ? (
         <div className="mt-3">
           <button className="text-sm font-semibold text-brand" onClick={() => setShowDone((v) => !v)}>
-            {showDone ? "Ukryj przejrzane" : `Pokaż przejrzane (${done.filter((c) => c.status === "zostawiona").length} zostawione, ${done.filter((c) => c.status === "cofnięta").length} cofnięte)`}
+            {showDone
+              ? "Ukryj historię"
+              : `Pokaż historię (${done.filter((c) => c.status === "zostawiona").length} zatwierdzone, ${done.filter((c) => c.status === "cofnięta").length} odrzucone)`}
           </button>
           {showDone ? (
             <ul className="mt-2 grid gap-2">
@@ -195,7 +149,7 @@ function ChangeItem({
         <button className="min-w-0 flex-1 text-left" onClick={() => setOpen((v) => !v)}>
           <span className="font-bold">{label}</span> <span className="text-xs text-muted">runda {c.round}</span>
         </button>
-        {c.status !== "do przejrzenia" ? <Badge tone={c.status === "zostawiona" ? "green" : "gray"}>{c.status}</Badge> : null}
+        {c.status !== "do przejrzenia" ? <Badge tone={c.status === "zostawiona" ? "green" : "gray"}>{STATUS_LABEL[c.status]}</Badge> : null}
       </div>
       <p className="mt-0.5 text-xs leading-relaxed text-muted">
         {c.reason}
@@ -206,11 +160,11 @@ function ChangeItem({
         <div className="mt-2 flex flex-wrap gap-1.5">
           {c.status === "do przejrzenia" ? (
             <button className="btn btn-sm border-emerald-600 bg-emerald-600 text-white" disabled={running} onClick={() => onDecide(c.id, "keep")}>
-              ✓ Zostaw
+              ✓ Zatwierdź
             </button>
           ) : null}
           <button className="btn btn-sm" disabled={running} onClick={() => onDecide(c.id, "revert")}>
-            ↶ Cofnij
+            {c.status === "do przejrzenia" ? "✗ Odrzuć" : "↶ Cofnij z CV"}
           </button>
           <button className="btn btn-sm" disabled={running} onClick={() => setCommenting((v) => !v)}>
             ✎ Popraw…

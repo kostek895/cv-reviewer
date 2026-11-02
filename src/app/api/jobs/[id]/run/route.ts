@@ -4,7 +4,7 @@ import { doAnalyze, doFetch, doImprove, doPdf, doRefine, doRewrite, doScore, doT
 type Body =
   | { action: "fetch" | "analyze" | "tailor" | "pdf" | "score" }
   | { action: "rewrite"; target: RewriteTarget; instruction?: string }
-  | { action: "improve"; target?: number }
+  | { action: "improve" }
   | { action: "refine"; changeId: string; comment: string };
 
 export async function POST(req: Request, ctx: RouteContext<"/api/jobs/[id]/run">) {
@@ -36,8 +36,7 @@ export async function POST(req: Request, ctx: RouteContext<"/api/jobs/[id]/run">
         break;
       case "improve": {
         if (!job.cv || !job.analysis) throw new Error("Najpierw napisz CV");
-        const target = Math.min(100, Math.max(50, Math.round(Number(body.target) || 100)));
-        await startJobTask(id, "improve", () => doImprove(id, target));
+        await startJobTask(id, "improve", () => doImprove(id));
         break;
       }
       case "refine":

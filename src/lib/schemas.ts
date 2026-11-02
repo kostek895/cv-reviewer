@@ -117,7 +117,6 @@ export const cvScoreSchema = obj({
 
 export const improveSchema = obj({
   changes: { type: "array", items: obj({ path: str, text: str, list: strArr, reason: str }) },
-  questions: { type: "array", items: obj({ question: str, kind: { type: "string", enum: ["pytanie", "brak"] } }) },
 });
 
 // Przepisanie pojedynczej sekcji
