@@ -1,0 +1,245 @@
+@import "@fontsource/manrope/400.css";
+@import "@fontsource/manrope/500.css";
+@import "@fontsource/manrope/600.css";
+@import "@fontsource/manrope/700.css";
+@import "@fontsource/manrope/800.css";
+
+:root {
+  --cv-blue: #0b63e5;
+  --cv-ink: #1b1d22;
+  --cv-muted: #7a7f88;
+  --cv-side-w: 36%;
+}
+
+@page {
+  size: A4;
+  margin: 0;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.cv {
+  /* liczone tutaj, a nie w :root – żeby brało kolor ustawiony na .cv */
+  --cv-side: color-mix(in srgb, var(--cv-blue) 10%, #fff);
+  font-family: "Manrope", Arial, sans-serif;
+  color: var(--cv-ink);
+  font-size: 9.6pt;
+  line-height: 1.5;
+  width: 210mm;
+  min-height: 297mm;
+  box-sizing: border-box;
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--cv-side-w) 1fr;
+  grid-template-rows: auto 1fr;
+  background: #fff;
+}
+
+.cv * {
+  box-sizing: border-box;
+}
+
+.cv-sidebar-bg {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--cv-side-w);
+  background: var(--cv-side);
+  z-index: 0;
+}
+
+@media print {
+  /* fixed = powtarza się na każdej stronie PDF */
+  .cv-sidebar-bg {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+  }
+}
+
+.cv-identity {
+  grid-column: 1;
+  grid-row: 1;
+  padding: 10mm 7mm 0 8mm;
+  position: relative;
+  z-index: 1;
+}
+.cv-rest {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: start;
+  padding: 0 7mm 10mm 8mm;
+  position: relative;
+  z-index: 1;
+}
+.cv-main {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  padding: 10mm 9mm 10mm 8mm;
+  position: relative;
+  z-index: 1;
+  text-align: justify;
+}
+
+.cv h1,
+.cv h2,
+.cv p,
+.cv ul {
+  margin: 0;
+}
+
+.cv-photo {
+  display: block;
+  width: 32mm;
+  height: 32mm;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 2mm solid var(--cv-blue);
+  margin: 0 auto 4mm;
+}
+
+.cv-name {
+  font-size: 22pt;
+  font-weight: 800;
+  color: var(--cv-blue);
+  text-align: center;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.cv-headline {
+  text-align: center;
+  font-weight: 600;
+  margin-top: 1.5mm;
+  font-size: 10.5pt;
+}
+
+.cv h2 {
+  font-size: 14pt;
+  font-weight: 800;
+  color: var(--cv-blue);
+  margin: 5mm 0 2mm;
+  letter-spacing: -0.01em;
+  break-after: avoid;
+}
+.cv-main > h2:first-child {
+  margin-top: 0;
+}
+
+.cv-summary {
+  font-size: 9.2pt;
+  line-height: 1.45;
+}
+
+.cv-contact {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 1.5mm;
+}
+.cv-contact li {
+  display: flex;
+  align-items: center;
+  gap: 2.5mm;
+  overflow-wrap: anywhere;
+}
+.cv-icon {
+  width: 4.2mm;
+  height: 4.2mm;
+  flex: none;
+}
+
+.cv-edu {
+  margin-bottom: 3mm;
+}
+.cv-edu .cv-period {
+  font-weight: 700;
+}
+
+.cv-lang {
+  display: flex;
+  justify-content: space-between;
+  gap: 3mm;
+}
+
+.cv-skills {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.6mm;
+}
+.cv-skills li {
+  border: 0.3mm solid var(--cv-blue);
+  border-radius: 2mm;
+  padding: 0.4mm 2mm;
+  background: #fff;
+  font-size: 8.4pt;
+}
+
+.cv-job {
+  margin-bottom: 4.5mm;
+  break-inside: avoid;
+}
+.cv-job-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 3mm;
+  text-align: left;
+}
+.cv-job-head strong {
+  font-weight: 800;
+}
+.cv-dot {
+  color: var(--cv-blue);
+  font-weight: 800;
+}
+.cv-period {
+  color: var(--cv-muted);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cv-intro {
+  margin-top: 1mm;
+}
+.cv-job ul {
+  margin-top: 1mm;
+  padding-left: 5mm;
+}
+.cv-job li {
+  margin-bottom: 0.4mm;
+}
+
+.cv-gdpr {
+  margin-top: 6mm;
+  font-size: 7pt;
+  line-height: 1.35;
+  color: var(--cv-muted);
+  text-align: justify;
+}
+
+/* ---------- Podgląd na ekranie ---------- */
+@media screen {
+  body.cv-preview {
+    background: #d9dde3;
+    padding: 24px 0;
+  }
+  body.cv-preview .cv {
+    margin: 0 auto;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+    /* linie końca strony A4 */
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc(297mm - 1px),
+      #e5484d calc(297mm - 1px),
+      #e5484d 297mm
+    );
+  }
+}

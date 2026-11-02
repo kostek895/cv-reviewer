@@ -1,0 +1,99 @@
+@import "tailwindcss";
+@import "@fontsource/manrope/400.css";
+@import "@fontsource/manrope/500.css";
+@import "@fontsource/manrope/600.css";
+@import "@fontsource/manrope/700.css";
+@import "@fontsource/manrope/800.css";
+
+@theme {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --color-brand: #0b63e5;
+  --color-brand-soft: #e8f0fd;
+  --color-ink: #1b1d22;
+  --color-muted: #6b7079;
+  --color-line: #e3e6eb;
+  --color-canvas: #f6f7f9;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+textarea {
+  field-sizing: content;
+}
+
+@layer components {
+  .input {
+    width: 100%;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    background: #fff;
+    padding: 7px 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .input:focus {
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 3px rgb(11 99 229 / 0.12);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid var(--color-line);
+    background: #fff;
+    color: var(--color-ink);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+    white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) {
+    border-color: #c9ced6;
+    background: #fafbfc;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--color-brand);
+    border-color: var(--color-brand);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: #0956c9;
+    border-color: #0956c9;
+  }
+  .btn-ghost {
+    border-color: transparent;
+    background: transparent;
+  }
+  .btn-sm {
+    padding: 4px 10px;
+    font-size: 13px;
+  }
+
+  .card {
+    background: #fff;
+    border: 1px solid var(--color-line);
+    border-radius: 12px;
+  }
+
+  .label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+}
