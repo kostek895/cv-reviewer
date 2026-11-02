@@ -1,9 +1,11 @@
 import { getJob } from "@/lib/store";
-import { doAnalyze, doFetch, doPdf, doRewrite, doScore, doTailor, startJobTask, type RewriteTarget } from "@/lib/tasks";
+import { doAnalyze, doFetch, doImprove, doPdf, doRefine, doRewrite, doScore, doTailor, startJobTask, type RewriteTarget } from "@/lib/tasks";
 
 type Body =
   | { action: "fetch" | "analyze" | "tailor" | "pdf" | "score" }
-  | { action: "rewrite"; target: RewriteTarget; instruction?: string };
+  | { action: "rewrite"; target: RewriteTarget; instruction?: string }
+  | { action: "improve"; target?: number }
+  | { action: "refine"; changeId: string; comment: string };
 
 export async function POST(req: Request, ctx: RouteContext<"/api/jobs/[id]/run">) {
   const { id } = await ctx.params;
@@ -31,6 +33,16 @@ export async function POST(req: Request, ctx: RouteContext<"/api/jobs/[id]/run">
       case "score":
         if (!job.cv || !job.analysis) throw new Error("Najpierw napisz CV");
         await startJobTask(id, "score", () => doScore(id));
+        break;
+      case "improve": {
+        if (!job.cv || !job.analysis) throw new Error("Najpierw napisz CV");
+        const target = Math.min(100, Math.max(50, Math.round(Number(body.target) || 96)));
+        await startJobTask(id, "improve", () => doImprove(id, target));
+        break;
+      }
+      case "refine":
+        if (!body.comment?.trim()) throw new Error("Napisz, co poprawić");
+        await startJobTask(id, "refine", () => doRefine(id, body.changeId, body.comment.trim()));
         break;
       case "pdf":
         await startJobTask(id, "pdf", () => doPdf(id, origin));

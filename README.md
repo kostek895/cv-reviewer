@@ -43,7 +43,7 @@ npm start
 1. **Baza CV**: wgraj swoje CV w PDF (możesz kilka wersji, Claude je scali) i kliknij import. Potem przejrzyj sekcje i dopisz przy stanowiskach liczby i efekty w „Twoje notatki”. Claude pisze CV **wyłącznie** z faktów w bazie, więc im więcej konkretów, tym lepsze CV. Dodaj też zdjęcie, jeśli chcesz je mieć w CV.
 2. **Oferty**: wklej link do ogłoszenia (pracuj.pl, justjoin.it, rocketjobs.pl, nofluffjobs.com i inne). Możesz dodać kilka naraz, oddzielone spacją, i analizować je później. Gdy strona wymaga logowania (np. LinkedIn), wklej treść ogłoszenia.
 3. **Analiza**: kogo szukają, wymagania kontra Twoje doświadczenie, słowa kluczowe ATS, czerwone flagi, rekomendacje, pytania do Ciebie i lista umiejętności do potwierdzenia („mam / nie mam”). Rekomendacje możesz edytować. To polecenia dla następnego kroku.
-4. **CV i list**: każdą sekcję edytujesz ręcznie albo poprawiasz przyciskiem „✦ Popraw z Claude”. Obok widzisz podgląd na żywo i wybór koloru szablonu. „Sprawdź dopasowanie” pokazuje wynik przed i po oraz listę braków. Na końcu generujesz PDF (z automatycznym testem odczytu ATS) i kopiujesz list.
+4. **CV i list**: każdą sekcję edytujesz ręcznie albo poprawiasz przyciskiem „✦ Popraw z Claude”. Obok widzisz podgląd na żywo i wybór koloru szablonu. „Sprawdź dopasowanie” pokazuje wynik przed i po oraz listę braków. „Popraw do celu” (90/96/100%) puszcza pętlę: Claude stosuje sugestie z oceny, ocenia CV ponownie i powtarza, aż osiągnie cel albo zabraknie faktów. Każdą zmianę widzisz jako „było → jest” i możesz ją zostawić, cofnąć albo poprawić własną uwagą. Gdy do celu brakuje faktów, dostajesz listę, czego Claude potrzebuje. Na końcu generujesz PDF (z automatycznym testem odczytu ATS) i kopiujesz list.
 
 Typowe czasy: analiza 1–3 min, pisanie CV 2–4 min, ocena 1–2 min. Zadania idą w tle, więc możesz w tym czasie przełączać zakładki.
 
@@ -67,7 +67,8 @@ Przykład: `CLAUDE_MODEL=sonnet npm run dev` (PowerShell: `$env:CLAUDE_MODEL="so
 
 | Ścieżka | Co |
 |---|---|
-| `.claude/skills/*/SKILL.md` | skille: `cv-import`, `job-analysis`, `cv-tailor`, `cv-rewrite`, `cv-score` |
+| `.claude/skills/*/SKILL.md` | skille: `cv-import`, `job-analysis`, `cv-tailor`, `cv-rewrite`, `cv-score`, `cv-improve` |
+| `.claude/skills/_shared/00-cel.md` | cel nadrzędny dołączany do każdego skilla: profil kandydata, zasady CV, ATS, wymogi ogłoszenia |
 | `.claude/skills/_shared/hr-best-practices.md` | wiedza o ATS, rekruterach, RODO i liście, dołączana do każdego skilla |
 | `src/lib/claude.ts` | wywołanie `claude -p` z JSON Schema |
 | `src/lib/tasks.ts` | zadania w tle (pobranie, analiza, pisanie, ocena, PDF) |

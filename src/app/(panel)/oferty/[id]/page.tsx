@@ -74,6 +74,11 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     }
   }
 
+  async function refresh() {
+    await reload();
+    setServerRev((r) => r + 1);
+  }
+
   async function remove() {
     if (!window.confirm("Usunąć tę ofertę razem z CV?")) return;
     await api(`/api/jobs/${id}`, { method: "DELETE" });
@@ -165,7 +170,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         {tab === "analysis" && job.analysis ? (
           <AnalysisStep key={serverRev} job={job} running={running} patch={patch} run={run} />
         ) : null}
-        {tab === "cv" && job.cv ? <CvStep key={serverRev} job={job} running={running} patch={patch} run={run} /> : null}
+        {tab === "cv" && job.cv ? <CvStep key={serverRev} job={job} running={running} patch={patch} run={run} refresh={refresh} /> : null}
       </div>
     </div>
   );

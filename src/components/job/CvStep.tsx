@@ -5,8 +5,9 @@ import { api, Area, Badge, Field, LinesArea, Section, Spinner, useDebouncedEffec
 import type { CvExperience, TailoredCv } from "@/lib/types";
 import type { StepProps } from "./PostingStep";
 import { ScoreCard } from "./ScoreCard";
+import { ImprovePanel } from "./ImprovePanel";
 
-export function CvStep({ job, running, patch, run }: StepProps) {
+export function CvStep({ job, running, patch, run, refresh }: StepProps) {
   const [cv, setCv] = useState<TailoredCv>(job.cv!);
   const [letter, setLetter] = useState(job.coverLetter ?? "");
   const [previewV, setPreviewV] = useState(0);
@@ -81,6 +82,17 @@ export function CvStep({ job, running, patch, run }: StepProps) {
             await patch({ cv }); // oceń dokładnie to, co widać w edytorze
             await run({ action: "score" });
           }}
+        />
+
+        <ImprovePanel
+          job={job}
+          cv={cv}
+          running={running}
+          run={async (body) => {
+            await patch({ cv }); // pracuj na tym, co widać w edytorze
+            await run(body);
+          }}
+          refresh={refresh ?? (async () => {})}
         />
 
         {job.changeNotes?.length ? (

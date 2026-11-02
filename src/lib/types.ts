@@ -160,7 +160,7 @@ export const JOB_STATUSES: JobStatus[] = [
   "odpuszczona",
 ];
 
-export type TaskKind = "fetch" | "analyze" | "tailor" | "rewrite" | "pdf" | "score";
+export type TaskKind = "fetch" | "analyze" | "tailor" | "rewrite" | "pdf" | "score" | "improve" | "refine";
 
 export interface TaskState {
   kind: TaskKind;
@@ -182,6 +182,25 @@ export interface CvScore {
   cvSnapshot: string; // JSON CV w chwili oceny – żeby pokazać, że CV zmieniło się od tego czasu
 }
 
+export interface CvChange {
+  id: string;
+  round: number;
+  path: string; // np. "summary", "experience.0.bullets" – patrz lib/cvpath.ts
+  before: string | string[];
+  after: string | string[];
+  reason: string;
+  status: "do przejrzenia" | "zostawiona" | "cofnięta";
+  comment?: string; // ostatnia uwaga kandydata do tej zmiany
+}
+
+export interface ImproveState {
+  target: number;
+  rounds: { round: number; scoreBefore: number; scoreAfter?: number; reverted?: boolean }[];
+  changes: CvChange[];
+  stopReason?: string;
+  blockers: string[]; // czego brakuje, żeby wynik rósł dalej
+}
+
 export interface Job {
   id: string;
   url: string;
@@ -199,6 +218,7 @@ export interface Job {
   coverLetter?: string;
   changeNotes?: string[];
   cvScore?: CvScore;
+  improve?: ImproveState;
   pdf?: { file: string; createdAt: string; atsOk: boolean; atsIssues: string[]; pages?: number };
   task?: TaskState;
 }

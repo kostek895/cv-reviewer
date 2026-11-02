@@ -115,6 +115,11 @@ export const cvScoreSchema = obj({
   suggestions: strArr,
 });
 
+export const improveSchema = obj({
+  changes: { type: "array", items: obj({ path: str, text: str, list: strArr, reason: str }) },
+  blockers: strArr,
+});
+
 // Przepisanie pojedynczej sekcji
 export const rewriteSchemas: Record<string, object> = {
   summary: obj({ value: str }),

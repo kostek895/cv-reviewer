@@ -9,6 +9,8 @@ export interface StepProps {
   running: boolean;
   patch: (p: Partial<Job>) => Promise<void>;
   run: (body: Record<string, unknown>) => Promise<void>;
+  /** pobiera ofertę z serwera i przeładowuje edytory */
+  refresh?: () => Promise<void>;
 }
 
 export function PostingStep({ job, running, patch, run }: StepProps) {

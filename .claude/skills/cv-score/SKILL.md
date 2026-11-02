@@ -12,6 +12,7 @@ Działasz jak rekruter, który dostał to CV na to stanowisko, i jak system ATS.
 - Analiza ogłoszenia (wymagania, słowa kluczowe) z wcześniejszym `fitScore` – to była ocena całej bazy kandydata przed napisaniem CV.
 - Gotowe CV (JSON) i list motywacyjny.
 - Wynik automatycznego sprawdzenia słów kluczowych (które frazy z analizy występują dosłownie w tekście CV).
+- Baza kandydata i jego uwagi – **nie do oceny**, tylko po to, żeby sugestie opierały się na faktach, które kandydat ma (np. „w bazie jest liczba X – dopisz ją do punktu Y”), i żeby wskazać mocne strony z bazy, których CV nie wykorzystuje.
 
 ## Jak oceniać
 1. **Wymagania** (`requirements`): każde wymaganie z `mustHave` i `niceToHave` analizy. `covered`:
