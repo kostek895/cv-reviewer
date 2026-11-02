@@ -23,7 +23,7 @@ Lokalny panel do dopasowywania CV do konkretnych ofert pracy. Wrzucasz swoje CV 
 ## Uruchomienie
 
 ```bash
-git clone <adres-repo> cv-reviewer
+git clone https://github.com/kostek895/cv-reviewer.git
 cd cv-reviewer
 npm install
 npm run dev
