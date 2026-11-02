@@ -14,8 +14,9 @@ export async function PATCH(req: Request, ctx: RouteContext<"/api/jobs/[id]">) {
   const { id } = await ctx.params;
   const patch = (await req.json()) as Partial<Job> & { clearTaskError?: boolean };
   const job = await updateJob(id, (j) => {
+    const cvBefore = JSON.stringify(j.cv);
     for (const k of EDITABLE) if (k in patch) (j as unknown as Record<string, unknown>)[k] = patch[k];
-    if ("cv" in patch) j.pdf = undefined; // CV zmienione – stary PDF nieaktualny
+    if ("cv" in patch && JSON.stringify(j.cv) !== cvBefore) j.pdf = undefined; // CV zmienione – stary PDF nieaktualny
     if (patch.clearTaskError && j.task?.status === "error") j.task = undefined;
   });
   return Response.json(job);

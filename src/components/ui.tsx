@@ -13,14 +13,17 @@ export async function api<T = unknown>(url: string, init?: RequestInit & { json?
   return data as T;
 }
 
-/** Wywołuje fn z opóźnieniem po ostatniej zmianie value. */
+/**
+ * Wywołuje fn z opóźnieniem po ostatniej zmianie deps.
+ * Porównuje wartości, a nie „pierwsze uruchomienie” – w trybie dev React montuje
+ * komponent dwa razy i flaga pierwszego uruchomienia przepuszczała pusty zapis.
+ */
 export function useDebouncedEffect(fn: () => void, deps: unknown[], ms = 700) {
-  const first = useRef(true);
+  const last = useRef(JSON.stringify(deps));
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
+    const now = JSON.stringify(deps);
+    if (now === last.current) return;
+    last.current = now;
     const t = setTimeout(fn, ms);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
