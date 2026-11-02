@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { api, Area, Badge, fitTone, Section, useDebouncedEffect } from "@/components/ui";
+import { api, Area, Badge, useDebouncedEffect } from "@/components/ui";
 import type { JobAnalysis, Profile, Recommendation, RequirementCheck, SkillSuggestion } from "@/lib/types";
 import type { StepProps } from "./PostingStep";
 
 const MATCH_TONE = { mocne: "green", częściowe: "amber", brak: "red" } as const;
+
+type Key = "questions" | "skills" | "recs" | "hints" | "reqs" | "keywords" | "culture";
 
 export function AnalysisStep({ job, running, patch, run }: StepProps) {
   const [a, setA] = useState<JobAnalysis>(job.analysis!);
@@ -25,115 +27,175 @@ export function AnalysisStep({ job, running, patch, run }: StepProps) {
       return n;
     });
 
+  // ---------- stan sekcji ----------
+  const skills = a.skillSuggestions ?? [];
   const unanswered = a.questions.filter((q) => !q.answer.trim()).length;
-  const openSkills = a.skillSuggestions?.filter((x) => !x.answer).length ?? 0;
+  const openSkills = skills.filter((x) => !x.answer).length;
+  const haveSkills = skills.filter((x) => x.answer === "mam").length;
+  const allReqs = [...a.mustHave, ...a.niceToHave];
+  const reqCount = (m: RequirementCheck["match"]) => allReqs.filter((r) => r.match === m).length;
+  const highRecs = a.recommendations.filter((r) => r.priority === "wysoki").length;
+
+  // Na start otwarte jest to, co wymaga Twojej reakcji; szczegóły ogłoszenia są zwinięte.
+  const [open, setOpen] = useState<Record<Key, boolean>>(() => ({
+    questions: unanswered > 0,
+    skills: openSkills > 0,
+    recs: true,
+    hints: false,
+    reqs: false,
+    keywords: false,
+    culture: false,
+  }));
+  const toggle = (k: Key) => setOpen((o) => ({ ...o, [k]: !o[k] }));
+  const jump = (k: Key) => {
+    setOpen((o) => ({ ...o, [k]: true }));
+    setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
 
   return (
-    <div className="grid gap-5">
-      <Section title="Kogo szukają" actions={<Badge tone={fitTone(a.fitScore)}>{a.fitScore}% dopasowania</Badge>}>
-        <p className="leading-relaxed">{a.whoTheySeek}</p>
-        <p className="mt-3 rounded-lg bg-canvas px-3 py-2 text-sm leading-relaxed">
-          <b>Ocena dopasowania:</b> {a.fitComment}
-        </p>
-        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted">
-          {a.seniority ? (
-            <span>
-              Poziom: <b className="text-ink">{a.seniority}</b>
-            </span>
-          ) : null}
-          {a.location ? (
-            <span>
-              Lokalizacja: <b className="text-ink">{a.location}</b>
-            </span>
-          ) : null}
-          <span>
-            CV powstanie po: <b className="text-ink">{a.language === "en" ? "angielsku" : "polsku"}</b>
-          </span>
-        </div>
-      </Section>
-
-      {/* Do uzupełnienia przez Ciebie – na pełnej szerokości, od razu pod podsumowaniem */}
-      {a.questions.length || a.skillSuggestions?.length ? (
-        <div className="grid items-start gap-5 xl:grid-cols-2">
-          {a.questions.length ? (
-            <Section title={<>Pytania do Ciebie {unanswered ? <Badge tone="amber">{unanswered} bez odpowiedzi</Badge> : null}</>}>
-              <p className="-mt-2 mb-3 text-xs text-muted">
-                Odpowiedzi to nowe fakty, których Claude może użyć. Pomiń pytanie, jeśli nie masz odpowiedzi – nic nie zostanie zmyślone.
-              </p>
-              <div className="grid gap-3">
-                {a.questions.map((q, i) => (
-                  <Area key={q.id} label={q.question} value={q.answer} onChange={(v) => upd((x) => void (x.questions[i].answer = v))} />
-                ))}
-              </div>
-            </Section>
-          ) : null}
-          {a.skillSuggestions?.length ? (
-            <SkillSuggestions items={a.skillSuggestions} onChange={(i, fn) => upd((x) => fn(x.skillSuggestions![i]))} />
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="grid items-start gap-5 xl:grid-cols-[1fr_420px]">
-        <div className="grid content-start gap-5">
-          <Section title="Wymagania vs Twoje doświadczenie">
-            <ReqTable title="Wymagane" items={a.mustHave} />
-            {a.niceToHave.length ? <ReqTable title="Mile widziane" items={a.niceToHave} className="mt-5" /> : null}
-          </Section>
-          <Section title="Słowa kluczowe (ATS)">
-            <div className="flex flex-wrap gap-1.5">
-              {a.keywords.map((k, i) => (
-                <span key={i} className="rounded-md border border-brand/30 bg-brand-soft px-2 py-0.5 text-sm font-semibold text-brand">
-                  {k}
-                </span>
-              ))}
+    <div className="grid gap-6 pb-2">
+      {/* ---------- Podsumowanie ---------- */}
+      <section className="card p-5">
+        <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+          <div className="min-w-0 flex-1 basis-[520px]">
+            <h3 className="mb-2 text-[15px] font-extrabold">Kogo szukają</h3>
+            <p className="leading-relaxed">{a.whoTheySeek}</p>
+            <p className="mt-3 rounded-lg bg-canvas px-3 py-2 text-sm leading-relaxed">
+              <b>Ocena dopasowania:</b> {a.fitComment}
+            </p>
+          </div>
+          <div className="w-full shrink-0 rounded-xl border border-line p-4 md:w-[260px]">
+            <div className="flex items-baseline gap-2">
+              <span className={`text-3xl font-extrabold ${a.fitScore >= 70 ? "text-emerald-600" : a.fitScore >= 45 ? "text-amber-600" : "text-rose-600"}`}>
+                {a.fitScore}%
+              </span>
+              <span className="text-sm font-semibold text-muted">dopasowania</span>
             </div>
-          </Section>
-          <div className="grid gap-5 md:grid-cols-2">
-            <Section title="Kultura i ton firmy">
-              <Bullets items={a.cultureSignals} />
-            </Section>
-            <Section title="Czerwone flagi">
-              {a.redFlags.length ? <Bullets items={a.redFlags} /> : <p className="text-sm text-muted">Nic niepokojącego.</p>}
-            </Section>
+            <p className="mt-1 text-xs text-muted">Twoja baza vs ogłoszenie, przed napisaniem CV</p>
+            <div className="mt-3 grid gap-0.5 text-xs text-muted">
+              {a.seniority ? (
+                <span>
+                  Poziom: <b className="text-ink">{a.seniority}</b>
+                </span>
+              ) : null}
+              {a.location ? (
+                <span>
+                  Lokalizacja: <b className="text-ink">{a.location}</b>
+                </span>
+              ) : null}
+              <span>
+                CV powstanie po: <b className="text-ink">{a.language === "en" ? "angielsku" : "polsku"}</b>
+              </span>
+            </div>
           </div>
         </div>
+      </section>
 
-        <div className="grid content-start gap-5">
-          <Section
-            title="Rekomendacje do CV"
-            actions={
-              <button className="btn btn-sm" onClick={() => upd((x) => void x.recommendations.push({ priority: "średni", text: "" }))}>
-                + Dodaj
-              </button>
-            }
-          >
-            <p className="-mt-2 mb-3 text-xs text-muted">
-              To są polecenia dla Claude&apos;a przy pisaniu. Popraw, usuń albo dopisz własne.
-            </p>
-            <div className="grid gap-2">
-              {a.recommendations.map((r, i) => (
-                <div key={i} className="flex gap-2">
-                  <select
-                    className={`input h-fit w-24 shrink-0 px-1.5 text-xs font-bold`}
-                    value={r.priority}
-                    onChange={(e) => upd((x) => void (x.recommendations[i].priority = e.target.value as Recommendation["priority"]))}
-                  >
-                    <option value="wysoki">wysoki</option>
-                    <option value="średni">średni</option>
-                    <option value="niski">niski</option>
-                  </select>
-                  <textarea
-                    className="input flex-1 text-sm"
-                    value={r.text}
-                    onChange={(e) => upd((x) => void (x.recommendations[i].text = e.target.value))}
-                  />
-                  <button className="btn btn-ghost btn-sm h-fit text-muted" onClick={() => upd((x) => void x.recommendations.splice(i, 1))}>
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-1">
+      {/* ---------- 1. Do uzupełnienia ---------- */}
+      {a.questions.length || skills.length ? (
+        <Group title="Twoje odpowiedzi" hint="Nowe fakty dla Claude'a. Wszystko jest opcjonalne – czego nie uzupełnisz, tego nie użyje.">
+          {a.questions.length ? (
+            <Accordion
+              id="questions"
+              title="Pytania do Ciebie"
+              open={open.questions}
+              onToggle={() => toggle("questions")}
+              status={unanswered ? <Badge tone="amber">{unanswered} do uzupełnienia</Badge> : <Badge tone="green">✓ wszystkie odpowiedziane</Badge>}
+            >
+              <div className="grid gap-x-5 gap-y-4 lg:grid-cols-2">
+                {a.questions.map((q, i) => (
+                  <div key={q.id}>
+                    <p className="mb-1.5 flex gap-2 text-sm font-semibold leading-snug">
+                      <span className={q.answer.trim() ? "text-emerald-600" : "text-line"}>{q.answer.trim() ? "✓" : "●"}</span>
+                      <span>{q.question}</span>
+                    </p>
+                    <Area
+                      value={q.answer}
+                      placeholder="Twoja odpowiedź (albo zostaw puste)"
+                      onChange={(v) => upd((x) => void (x.questions[i].answer = v))}
+                    />
+                  </div>
+                ))}
+              </div>
+            </Accordion>
+          ) : null}
+
+          {skills.length ? (
+            <Accordion
+              id="skills"
+              title="Czy to umiesz?"
+              open={open.skills}
+              onToggle={() => toggle("skills")}
+              status={
+                openSkills ? (
+                  <Badge tone="amber">{openSkills} do zaznaczenia</Badge>
+                ) : (
+                  <Badge tone="green">
+                    ✓ {haveSkills} mam · {skills.length - haveSkills} nie mam
+                  </Badge>
+                )
+              }
+            >
+              <SkillSuggestions items={skills} onChange={(i, fn) => upd((x) => fn(x.skillSuggestions![i]))} onBulk={(fn) => upd((x) => x.skillSuggestions!.forEach(fn))} />
+            </Accordion>
+          ) : null}
+        </Group>
+      ) : null}
+
+      {/* ---------- 2. Plan CV ---------- */}
+      <Group title="Plan CV" hint="Polecenia dla Claude'a przy pisaniu. Popraw, usuń albo dopisz własne.">
+        <Accordion
+          id="recs"
+          title="Rekomendacje"
+          open={open.recs}
+          onToggle={() => toggle("recs")}
+          status={
+            <Badge tone="blue">
+              {a.recommendations.length} {highRecs ? `· ${highRecs} ważnych` : ""}
+            </Badge>
+          }
+          actions={
+            <button className="btn btn-sm" onClick={() => upd((x) => void x.recommendations.push({ priority: "średni", text: "" }))}>
+              + Dodaj
+            </button>
+          }
+        >
+          <div className="grid gap-2">
+            {a.recommendations.map((r, i) => (
+              <div key={i} className="flex gap-2">
+                <select
+                  className={`input h-fit w-24 shrink-0 px-1.5 text-xs font-bold ${r.priority === "wysoki" ? "text-rose-700" : r.priority === "średni" ? "text-amber-800" : "text-muted"}`}
+                  value={r.priority}
+                  onChange={(e) => upd((x) => void (x.recommendations[i].priority = e.target.value as Recommendation["priority"]))}
+                >
+                  <option value="wysoki">wysoki</option>
+                  <option value="średni">średni</option>
+                  <option value="niski">niski</option>
+                </select>
+                <textarea
+                  className="input flex-1 text-sm"
+                  rows={2}
+                  value={r.text}
+                  onChange={(e) => upd((x) => void (x.recommendations[i].text = e.target.value))}
+                />
+                <button
+                  className="btn btn-ghost btn-sm h-fit text-muted"
+                  title="Usuń"
+                  onClick={() => upd((x) => void x.recommendations.splice(i, 1))}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+          <details className="group mt-4">
+            <summary className="cursor-pointer list-none text-sm font-semibold text-brand">
+              <span className="group-open:hidden">
+                Pokaż, co podkreślić ({a.emphasize.length}) i wyciszyć ({a.deemphasize.length})
+              </span>
+              <span className="hidden group-open:inline">Ukryj, co podkreślić i wyciszyć</span>
+            </summary>
+            <div className="mt-3 grid gap-4 text-sm md:grid-cols-2">
               <div>
                 <span className="label">Podkreślić</span>
                 <Bullets items={a.emphasize} />
@@ -143,33 +205,100 @@ export function AnalysisStep({ job, running, patch, run }: StepProps) {
                 <Bullets items={a.deemphasize} />
               </div>
             </div>
-          </Section>
-          <Section title="List motywacyjny – kąt">
-            <Area value={a.coverLetterAngle} onChange={(v) => upd((x) => void (x.coverLetterAngle = v))} />
-          </Section>
-          <Section title="Twoje dodatkowe uwagi">
+          </details>
+        </Accordion>
+
+        <Accordion
+          id="hints"
+          title="Twoje wskazówki i list motywacyjny"
+          open={open.hints}
+          onToggle={() => toggle("hints")}
+          status={userNotes.trim() ? <Badge tone="green">✓ są uwagi</Badge> : <Badge>opcjonalne</Badge>}
+        >
+          <div className="grid gap-4 lg:grid-cols-2">
             <Area
-              rows={3}
+              label="Twoje dodatkowe uwagi do CV"
+              rows={4}
               value={userNotes}
               placeholder="np. podkreśl projekt migracji do chmury, pomiń pierwszą pracę, CV max 1 strona…"
               onChange={setUserNotes}
             />
-          </Section>
-        </div>
-      </div>
+            <Area
+              label="Kąt listu motywacyjnego"
+              rows={4}
+              value={a.coverLetterAngle}
+              onChange={(v) => upd((x) => void (x.coverLetterAngle = v))}
+            />
+          </div>
+        </Accordion>
+      </Group>
 
+      {/* ---------- 3. Szczegóły ogłoszenia ---------- */}
+      <Group title="Szczegóły ogłoszenia" hint="Na czym opiera się analiza – rozwiń, jeśli chcesz sprawdzić.">
+        <Accordion
+          id="reqs"
+          title="Wymagania vs Twoje doświadczenie"
+          open={open.reqs}
+          onToggle={() => toggle("reqs")}
+          status={
+            <span className="flex flex-wrap gap-1">
+              {reqCount("mocne") ? <Badge tone="green">{reqCount("mocne")} mocne</Badge> : null}
+              {reqCount("częściowe") ? <Badge tone="amber">{reqCount("częściowe")} częściowe</Badge> : null}
+              {reqCount("brak") ? <Badge tone="red">{reqCount("brak")} brak</Badge> : null}
+            </span>
+          }
+        >
+          <div className="grid gap-x-8 gap-y-5 xl:grid-cols-2">
+            <ReqTable title="Wymagane" items={a.mustHave} />
+            {a.niceToHave.length ? <ReqTable title="Mile widziane" items={a.niceToHave} /> : null}
+          </div>
+        </Accordion>
+
+        <Accordion
+          id="keywords"
+          title="Słowa kluczowe (ATS)"
+          open={open.keywords}
+          onToggle={() => toggle("keywords")}
+          status={<Badge tone="blue">{a.keywords.length}</Badge>}
+        >
+          <div className="flex flex-wrap gap-1.5">
+            {a.keywords.map((k, i) => (
+              <span key={i} className="rounded-md border border-brand/30 bg-brand-soft px-2 py-0.5 text-sm font-semibold text-brand">
+                {k}
+              </span>
+            ))}
+          </div>
+        </Accordion>
+
+        <Accordion
+          id="culture"
+          title="Kultura firmy i czerwone flagi"
+          open={open.culture}
+          onToggle={() => toggle("culture")}
+          status={a.redFlags.length ? <Badge tone="red">{a.redFlags.length} czerwone flagi</Badge> : <Badge tone="green">bez czerwonych flag</Badge>}
+        >
+          <div className="grid gap-5 md:grid-cols-2">
+            <div>
+              <span className="label">Kultura i ton</span>
+              <Bullets items={a.cultureSignals} />
+            </div>
+            <div>
+              <span className="label">Czerwone flagi</span>
+              {a.redFlags.length ? <Bullets items={a.redFlags} /> : <p className="text-sm text-muted">Nic niepokojącego.</p>}
+            </div>
+          </div>
+        </Accordion>
+      </Group>
+
+      {/* ---------- Pasek akcji ---------- */}
       <div className="card sticky bottom-4 z-10 flex flex-wrap items-center gap-2 p-3 shadow-lg">
-        <span className="mr-auto text-sm text-muted">
-          {unanswered || openSkills ? (
-            <>
-              Do uzupełnienia: {unanswered ? <b className="text-ink">{unanswered} pytań</b> : null}
-              {unanswered && openSkills ? " i " : null}
-              {openSkills ? <b className="text-ink">{openSkills} umiejętności</b> : null}. Możesz też pominąć.
-            </>
-          ) : (
-            "Wszystko uzupełnione – możesz pisać CV."
-          )}
-        </span>
+        <div className="mr-auto flex flex-wrap items-center gap-2 text-sm">
+          {a.questions.length ? (
+            <Progress label="Pytania" done={a.questions.length - unanswered} total={a.questions.length} onClick={() => jump("questions")} />
+          ) : null}
+          {skills.length ? <Progress label="Umiejętności" done={skills.length - openSkills} total={skills.length} onClick={() => jump("skills")} /> : null}
+          <span className="text-xs text-muted">{unanswered || openSkills ? "Możesz pisać CV też bez kompletu." : "Wszystko uzupełnione."}</span>
+        </div>
         <button className="btn" disabled={running} onClick={() => run({ action: "analyze" })}>
           Analizuj ponownie
         </button>
@@ -188,20 +317,82 @@ export function AnalysisStep({ job, running, patch, run }: StepProps) {
   );
 }
 
-function ReqTable({ title, items, className = "" }: { title: string; items: RequirementCheck[]; className?: string }) {
+// ---------- Elementy układu ----------
+
+function Group({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className={className}>
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-baseline gap-x-3 px-1">
+        <h2 className="text-xs font-extrabold uppercase tracking-wider text-muted">{title}</h2>
+        {hint ? <span className="text-xs text-muted">{hint}</span> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Accordion({
+  id,
+  title,
+  status,
+  actions,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  status?: React.ReactNode;
+  actions?: React.ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section id={`sec-${id}`} className="card scroll-mt-20 overflow-hidden">
+      <div className="flex items-center gap-3 px-5 py-3.5">
+        <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={onToggle} aria-expanded={open}>
+          <span className={`text-muted transition-transform ${open ? "rotate-90" : ""}`} aria-hidden>
+            ▸
+          </span>
+          <h3 className="text-[15px] font-extrabold">{title}</h3>
+          {status}
+        </button>
+        {open ? actions : null}
+      </div>
+      {open ? <div className="border-t border-line px-5 pb-5 pt-4">{children}</div> : null}
+    </section>
+  );
+}
+
+function Progress({ label, done, total, onClick }: { label: string; done: number; total: number; onClick: () => void }) {
+  const complete = done === total;
+  return (
+    <button
+      onClick={onClick}
+      title="Przejdź do sekcji"
+      className={`flex items-center gap-2 rounded-full border px-3 py-1 font-semibold ${complete ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-900"}`}
+    >
+      {label} {done}/{total}
+      <span className="h-1.5 w-12 overflow-hidden rounded-full bg-white">
+        <span className={`block h-full ${complete ? "bg-emerald-500" : "bg-amber-500"}`} style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+      </span>
+    </button>
+  );
+}
+
+function ReqTable({ title, items }: { title: string; items: RequirementCheck[] }) {
+  return (
+    <div>
       <span className="label">{title}</span>
       <ul className="divide-y divide-line">
         {items.map((r, i) => (
-          <li key={i} className="grid gap-1 py-2.5 md:grid-cols-[1fr_auto]">
-            <div>
+          <li key={i} className="flex items-start gap-3 py-2.5">
+            <div className="min-w-0 flex-1">
               <p className="font-semibold">{r.requirement}</p>
               {r.evidence ? <p className="mt-0.5 text-sm text-muted">{r.evidence}</p> : null}
             </div>
-            <div>
-              <Badge tone={MATCH_TONE[r.match]}>{r.match}</Badge>
-            </div>
+            <Badge tone={MATCH_TONE[r.match]}>{r.match}</Badge>
           </li>
         ))}
       </ul>
@@ -222,9 +413,11 @@ function Bullets({ items }: { items: string[] }) {
 function SkillSuggestions({
   items,
   onChange,
+  onBulk,
 }: {
   items: SkillSuggestion[];
   onChange: (i: number, fn: (s: SkillSuggestion) => void) => void;
+  onBulk: (fn: (s: SkillSuggestion) => void) => void;
 }) {
   const [saveMsg, setSaveMsg] = useState("");
   const open = items.filter((s) => !s.answer).length;
@@ -248,18 +441,18 @@ function SkillSuggestions({
   }
 
   return (
-    <Section title={<>Czy to umiesz? {open ? <Badge tone="amber">{open} do zaznaczenia</Badge> : null}</>}>
-      <p className="-mt-2 mb-3 text-xs text-muted">
+    <>
+      <p className="mb-3 text-sm text-muted">
         Rzeczy, które warto mieć w CV pod tę ofertę, a których nie ma w Twojej bazie. Do CV trafią tylko te z „mam”.
       </p>
-      <ul className="grid gap-2.5">
+      <ul className="grid gap-2 lg:grid-cols-2">
         {items.map((s, i) => (
           <li
             key={s.id}
-            className={`rounded-lg border px-3 py-2 ${s.answer === "mam" ? "border-emerald-200 bg-emerald-50/60" : s.answer === "nie mam" ? "border-line opacity-60" : "border-line"}`}
+            className={`rounded-lg border px-3 py-2 ${s.answer === "mam" ? "border-emerald-200 bg-emerald-50/60" : s.answer === "nie mam" ? "border-line bg-canvas/50" : "border-line"}`}
           >
             <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
+              <div className={`min-w-0 flex-1 ${s.answer === "nie mam" ? "opacity-50" : ""}`}>
                 <p className="font-semibold leading-snug">{s.name}</p>
                 <p className="mt-0.5 text-xs leading-relaxed text-muted">{s.why}</p>
               </div>
@@ -277,8 +470,8 @@ function SkillSuggestions({
             </div>
             {s.answer === "mam" ? (
               <input
-                className="input mt-2 text-sm"
-                placeholder="Gdzie i jak tego używałeś? (opcjonalnie – pomoże wpleść to w doświadczenie)"
+                className="input mt-2 py-1.5 text-sm"
+                placeholder="Gdzie i jak? (opcjonalnie – pomoże wpleść to w doświadczenie)"
                 value={s.note}
                 onChange={(e) => onChange(i, (x) => void (x.note = e.target.value))}
               />
@@ -286,14 +479,21 @@ function SkillSuggestions({
           </li>
         ))}
       </ul>
-      {confirmed.length ? (
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button className="btn btn-sm" onClick={saveToProfile}>
-            Dodaj zaznaczone do Bazy CV
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {open ? (
+          <button className="btn btn-sm" onClick={() => onBulk((x) => void (x.answer = x.answer || "nie mam"))}>
+            Pozostałe {open} oznacz „nie mam”
           </button>
-          <span className="text-xs text-muted">{saveMsg || "Wtedy kolejne oferty od razu będą o tym wiedzieć."}</span>
-        </div>
-      ) : null}
-    </Section>
+        ) : null}
+        {confirmed.length ? (
+          <>
+            <button className="btn btn-sm" onClick={saveToProfile}>
+              Dodaj {confirmed.length} „mam” do Bazy CV
+            </button>
+            <span className="text-xs text-muted">{saveMsg || "Kolejne oferty od razu będą o tym wiedzieć."}</span>
+          </>
+        ) : null}
+      </div>
+    </>
   );
 }
