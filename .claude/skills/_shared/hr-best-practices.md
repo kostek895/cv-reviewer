@@ -12,6 +12,7 @@
 
 ## Treść
 - Osiągnięcia zamiast obowiązków. Wzór: czasownik dokonany + co + efekt/skala (liczba, %, użytkownicy, przychód, czas). „Zbudowałem…”, „Wdrożyłem…”, „Skróciłem…”, „Doprowadziłem…”.
+- Praca zespołowa: gdy coś powstało w zespole, a kandydat nim kierował lub był za to odpowiedzialny (np. jako Product Owner / PM), domyślna forma to **„Odpowiadałem za …”** + skala zespołu, jeśli kandydat ją podał + efekt, np. „Odpowiadałem za nową aplikację radiową Acme FM (zespół 6 osób): 50 000 użytkowników w pierwszym roku.”. Nie pisz wtedy „Stworzyłem / Zbudowałem / Napisałem …”, bo sugeruje samodzielne wykonanie. Formy „Zbudowałem…”, „Napisałem…”, „Przepisałem…” zostaw dla tego, co kandydat zrobił sam. Nie zaczynaj w ten sposób każdego punktu – inne punkty mogą zaczynać się od czasownika opisującego jego osobisty wkład („Zdefiniowałem…”, „Wprowadziłem…”, „Poprowadziłem…”).
 - Liczby przyciągają wzrok i budują wiarygodność. Używaj tylko liczb podanych przez kandydata.
 - Najważniejsze i najbardziej dopasowane punkty na górze każdej pozycji; 3–6 punktów na stanowisko, mniej dla starszych/mniej istotnych ról.
 - Każdy punkt to jedna linia–dwie. Bez ogólników („osoba kreatywna i komunikatywna”) bez dowodu – zamiast tego fakt, który to pokazuje.

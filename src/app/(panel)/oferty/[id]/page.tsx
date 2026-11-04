@@ -54,13 +54,16 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     prevKind.current = job?.task?.status === "running" ? kind : undefined;
   }, [job?.task]);
 
-  async function patch(p: Partial<Job>) {
-    setJob((j) => (j ? { ...j, ...p } : j));
+  async function patch(p: Partial<Job> & { cvBase?: string }) {
+    const { cvBase, ...fields } = p;
     try {
       const j = await api<Job>(`/api/jobs/${id}`, { method: "PATCH", json: p });
-      setJob((cur) => (cur ? { ...cur, pdf: j.pdf, updatedAt: j.updatedAt } : j));
+      void cvBase;
+      setJob((cur) => (cur ? { ...cur, ...fields, pdf: j.pdf, updatedAt: j.updatedAt } : j));
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     }
   }
 

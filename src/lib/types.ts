@@ -200,6 +200,12 @@ export interface ImproveQuestion {
   answer: string;
 }
 
+export interface CvVersion {
+  at: string; // kiedy zapisano tę wersję (tuż przed zmianą)
+  source: string; // co ją zastąpiło, np. „ręczna edycja”, „Napisz CV”
+  cv: TailoredCv;
+}
+
 export interface ImproveState {
   target: number;
   rounds: { round: number; scoreBefore: number; scoreAfter?: number; reverted?: boolean }[];
@@ -236,6 +242,8 @@ export interface Job {
   cvScore?: CvScore;
   improve?: ImproveState;
   pdf?: { file: string; createdAt: string; atsOk: boolean; atsIssues: string[]; pages?: number };
+  /** Poprzednie wersje CV (stan sprzed zmiany), najnowsza na końcu. */
+  cvHistory?: CvVersion[];
   task?: TaskState;
 }
 

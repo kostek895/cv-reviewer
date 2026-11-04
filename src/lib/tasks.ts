@@ -175,7 +175,7 @@ ${await profileForPrompt(profile)}
     j.coverLetter = res.coverLetter;
     j.changeNotes = res.changeNotes;
     j.pdf = undefined;
-  });
+  }, "Napisz CV (Claude)");
 }
 
 // ---------- Poprawka sekcji ----------
@@ -231,7 +231,7 @@ ${await profileForPrompt(profile)}
     else if (target.section === "experience") j.cv.experience[target.index] = res.value as TailoredCv["experience"][number];
     else (j.cv as unknown as Record<string, unknown>)[target.section] = res.value;
     j.pdf = undefined;
-  });
+  }, "Popraw z Claude");
 }
 
 // ---------- Ocena gotowego CV ----------
@@ -449,7 +449,17 @@ ${await profileForPrompt(profile)}
     }
     c.after = res.value;
     c.comment = comment;
-  });
+  }, "przeredagowanie propozycji");
+}
+
+/** Przywróć wersję CV z historii (bieżąca trafia do historii, więc da się wrócić). */
+export async function restoreCv(id: string, at: string) {
+  return updateJob(id, (j) => {
+    const v = j.cvHistory?.find((x) => x.at === at);
+    if (!v) throw new Error("Nie znaleziono tej wersji");
+    j.cv = structuredClone(v.cv);
+    j.pdf = undefined;
+  }, "przywrócenie wersji");
 }
 
 /** Zatwierdź (wstaw do CV) albo odrzuć / cofnij propozycję. Bez Claude'a. */
@@ -482,7 +492,7 @@ export async function decideChange(id: string, changeId: string | "all", op: "ke
         c.status = "cofnięta";
       }
     }
-  });
+  }, op === "keep" ? "zatwierdzenie propozycji" : "odrzucenie propozycji");
 }
 
 // ---------- PDF ----------

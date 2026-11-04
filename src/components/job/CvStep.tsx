@@ -6,6 +6,7 @@ import type { CvExperience, TailoredCv } from "@/lib/types";
 import type { StepProps } from "./PostingStep";
 import { ScoreCard } from "./ScoreCard";
 import { ImprovePanel } from "./ImprovePanel";
+import { CvHistory } from "./CvHistory";
 
 export function CvStep({ job, running, patch, run, refresh }: StepProps) {
   const [cv, setCv] = useState<TailoredCv>(job.cv!);
@@ -36,10 +37,20 @@ export function CvStep({ job, running, patch, run, refresh }: StepProps) {
     }
   }
 
+  // wersja CV z serwera, na której pracuje edytor – serwer odrzuci zapis, jeśli CV zmieniło się gdzie indziej
+  const cvBase = useRef(JSON.stringify(job.cv));
+  async function saveCv() {
+    const json = JSON.stringify(cv);
+    if (json === cvBase.current) return true;
+    const ok = await patch({ cv, cvBase: cvBase.current });
+    if (ok) cvBase.current = json;
+    return ok;
+  }
+
   useDebouncedEffect(
     () => {
       setSaving(true);
-      patch({ cv }).then(() => {
+      saveCv().then(() => {
         setSaving(false);
         setPreviewV((v) => v + 1);
       });
@@ -79,7 +90,7 @@ export function CvStep({ job, running, patch, run, refresh }: StepProps) {
           cv={cv}
           running={running}
           onScore={async () => {
-            await patch({ cv }); // oceń dokładnie to, co widać w edytorze
+            if (!(await saveCv())) return; // oceń dokładnie to, co widać w edytorze
             await run({ action: "score" });
           }}
         />
@@ -89,10 +100,20 @@ export function CvStep({ job, running, patch, run, refresh }: StepProps) {
           cv={cv}
           running={running}
           run={async (body) => {
-            await patch({ cv }); // pracuj na tym, co widać w edytorze
+            if (!(await saveCv())) return; // pracuj na tym, co widać w edytorze
             await run(body);
           }}
           refresh={refresh ?? (async () => {})}
+        />
+
+        <CvHistory
+          jobId={job.id}
+          cv={cv}
+          running={running}
+          beforeRestore={async () => {
+            if (!(await saveCv())) throw new Error("Nie udało się zapisać obecnej wersji – odśwież stronę.");
+          }}
+          onRestored={refresh ?? (async () => {})}
         />
 
         {job.changeNotes?.length ? (

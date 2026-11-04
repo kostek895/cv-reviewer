@@ -107,16 +107,38 @@ export async function saveJob(job: Job) {
 
 // Odczyt-modyfikacja-zapis w jednej kolejce na ofertę.
 const locks = new Map<string, Promise<unknown>>();
-export async function updateJob(id: string, fn: (j: Job) => void | Promise<void>) {
+export async function updateJob(id: string, fn: (j: Job) => void | Promise<void>, cvSource = "zmiana") {
   const prev = locks.get(id) ?? Promise.resolve();
   const next = prev.then(async () => {
     const job = await getJob(id);
     if (!job) throw new Error("Nie znaleziono oferty");
+    const cvBefore = job.cv ? JSON.stringify(job.cv) : null;
     await fn(job);
+    if (cvBefore && JSON.stringify(job.cv) !== cvBefore) rememberCv(job, JSON.parse(cvBefore), cvSource);
     return saveJob(job);
   });
   locks.set(id, next.catch(() => undefined));
   return next;
+}
+
+const HISTORY_MAX = 40;
+const MANUAL = "ręczna edycja";
+
+/** Zapisz wersję CV sprzed zmiany. Kolejne ręczne edycje w ciągu 5 min to jedna sesja – jedna wersja. */
+function rememberCv(job: Job, before: Job["cv"], source: string) {
+  if (!before) return;
+  const h = (job.cvHistory ??= []);
+  const last = h.at(-1);
+  if (source === MANUAL && last?.source === MANUAL && Date.now() - Date.parse(last.at) < 5 * 60_000) return;
+  h.push({ at: new Date().toISOString(), source, cv: before });
+  if (h.length > HISTORY_MAX) h.splice(0, h.length - HISTORY_MAX);
+}
+
+/** Oferta bez ciężkiej historii wersji – do odpowiedzi API. */
+export function publicJob(job: Job): Job {
+  const { cvHistory, ...rest } = job;
+  void cvHistory;
+  return rest;
 }
 
 export async function listJobs(): Promise<Job[]> {

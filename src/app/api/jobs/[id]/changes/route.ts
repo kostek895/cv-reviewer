@@ -10,7 +10,8 @@ export async function POST(req: Request, ctx: RouteContext<"/api/jobs/[id]/chang
   if (job.task?.status === "running") return Response.json({ error: "Poczekaj, aż Claude skończy" }, { status: 409 });
   if (!changeId || (op !== "keep" && op !== "revert")) return Response.json({ error: "Złe dane" }, { status: 400 });
   try {
-    return Response.json(await decideChange(id, changeId, op));
+    await decideChange(id, changeId, op);
+    return Response.json({ ok: true });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 409 });
   }

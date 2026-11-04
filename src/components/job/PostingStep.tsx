@@ -7,7 +7,7 @@ import type { Job } from "@/lib/types";
 export interface StepProps {
   job: Job;
   running: boolean;
-  patch: (p: Partial<Job>) => Promise<void>;
+  patch: (p: Partial<Job> & { cvBase?: string }) => Promise<boolean>;
   run: (body: Record<string, unknown>) => Promise<void>;
   /** pobiera ofertę z serwera i przeładowuje edytory */
   refresh?: () => Promise<void>;
